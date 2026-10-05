@@ -1,0 +1,7 @@
+# Read by BuildKit because it sits next to deploy/Dockerfile and shares its
+# name. A plain deploy/.dockerignore is ignored: Docker only looks for
+# .dockerignore at the root of the build context (the repo root here).
+**/target/
+.git/
+**/*.md
+.github/
