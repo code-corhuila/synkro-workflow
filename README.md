@@ -5,6 +5,25 @@
 Part of the **SynkroTech SAS Sales Management System** — organization `code-corhuila`.
 Governance and documentation live in [`synkro-docs`](https://github.com/code-corhuila/synkro-docs).
 
+## Running locally
+
+```bash
+mvn install -DskipTests
+mvn -pl workflow-app spring-boot:run
+```
+
+The service listens on `:8080`. Verify it:
+
+```bash
+curl http://localhost:8080/health
+```
+
+## Running the tests
+
+```bash
+mvn -pl workflow-app -am test
+```
+
 ## Branching
 
 Three permanent branches. **None of them accepts a direct commit** — you enter through a child
