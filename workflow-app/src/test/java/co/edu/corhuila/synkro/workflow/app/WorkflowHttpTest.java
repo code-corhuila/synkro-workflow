@@ -28,4 +28,42 @@ class WorkflowHttpTest {
         assertThat(response.getBody()).contains("\"status\":\"ok\"");
         assertThat(response.getBody()).contains("\"service\":\"synkro-workflow\"");
     }
+
+    @Test
+    void protectedRoute_returns401WithNoToken() {
+        ResponseEntity<String> response = restTemplate.getForEntity(url("/api/v1/sagas/anything"), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getBody()).contains("\"error\":\"UNAUTHORIZED\"");
+    }
+
+    @Test
+    void protectedRoute_withPresentButMalformedToken_reachesTheController() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer not-a-real-token");
+        ResponseEntity<String> response = restTemplate.exchange(
+            url("/api/v1/sagas/anything"), HttpMethod.GET, new HttpEntity<>(headers), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_IMPLEMENTED);
+    }
+
+    @Test
+    void authenticatedRequestToAnUnknownRoute_keepsItsRealStatus() {
+        // Guards against the /error-dispatch bug found in HU-AUTH-01:
+        // Spring Security re-evaluating its internal error dispatch must
+        // not turn a real 404 into a 401.
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer x.y.z");
+        ResponseEntity<String> response = restTemplate.exchange(
+            url("/api/v1/does-not-exist"), HttpMethod.GET, new HttpEntity<>(headers), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void directRequestToErrorPath_isStillDenied() {
+        ResponseEntity<String> response = restTemplate.getForEntity(url("/error"), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
 }
