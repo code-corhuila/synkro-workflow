@@ -36,6 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           mvn -q -pl workflow-core dependency:tree -DoutputFile=/tmp/workflow-core-deps.txt
+          test -s /tmp/workflow-core-deps.txt
           if grep -qi 'org.springframework' /tmp/workflow-core-deps.txt; then
             echo "workflow-core depends on Spring:"
             cat /tmp/workflow-core-deps.txt
