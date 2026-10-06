@@ -38,6 +38,15 @@ class WorkflowHttpTest {
     }
 
     @Test
+    void unauthorizedResponse_hasUtf8ContentType() {
+        ResponseEntity<String> response = restTemplate.getForEntity(url("/api/v1/sagas/anything"), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        String contentType = response.getHeaders().getFirst("Content-Type");
+        assertThat(contentType).containsIgnoringCase("UTF-8");
+    }
+
+    @Test
     void protectedRoute_withPresentButMalformedToken_reachesTheController() {
         HttpHeaders headers = new HttpHeaders();
         headers.set("Authorization", "Bearer not-a-real-token");
