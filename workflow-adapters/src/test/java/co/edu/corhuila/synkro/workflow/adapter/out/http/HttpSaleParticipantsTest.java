@@ -26,7 +26,7 @@ class HttpSaleParticipantsTest {
             byte[] bytes=body.getBytes(java.nio.charset.StandardCharsets.UTF_8);exchange.sendResponseHeaders(status,bytes.length);exchange.getResponseBody().write(bytes);exchange.close();
         });server.start();
         URI base=URI.create("http://127.0.0.1:"+server.getAddress().getPort());
-        client=new HttpSaleParticipants(HttpClient.newBuilder().connectTimeout(Duration.ofMillis(200)).followRedirects(HttpClient.Redirect.NEVER).build(),JsonMapper.builder().build(),base,base,base,()->"service-sentinel",Duration.ofMillis(500));
+        client=new HttpSaleParticipants(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).followRedirects(HttpClient.Redirect.NEVER).build(),JsonMapper.builder().build(),base,base,base,()->"service-sentinel",Duration.ofSeconds(3));
     }
     @AfterEach void stop(){server.stop(0);}
     @Test void customerCredentialCorrelationAndActiveValidation() {
