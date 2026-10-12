@@ -22,18 +22,18 @@ public final class HttpSaleParticipants implements SaleParticipants {
         this.client=client;this.json=json;this.customers=customers;this.products=products;this.sales=sales;this.token=token;this.timeout=timeout;
     }
     public void validateCustomer(UUID id,String key,String trace) {
-        JsonNode r=request(customers,"/api/v1/customers/"+id,"GET",null,key,trace);
+        JsonNode r=request(customers,"/api/v1/customers/"+id,"GET",null,key,trace,Set.of(404));
         validate(()->{equal(uuid(r,"customerId"),id);text(r,"name");text(r,"identityDocument");date(r,"registrationDate");bool(r,"active");});
         if(!r.get("active").booleanValue())throw new ParticipantFailure(ParticipantFailure.Kind.REJECTED);
     }
     public Reservation reserve(SaleInput input,String key,String trace) {
-        JsonNode response=request(products,"/api/v1/stock-reservations","POST",Map.of("lines",input.lines()),key,trace);
+        JsonNode response=request(products,"/api/v1/stock-reservations","POST",Map.of("lines",input.lines()),key,trace,Set.of(400,422));
         Reservation reservation=parseReservation(response,"RESERVED");
         validate(()->equal(reservation.lines().stream().map(l->new SaleInput.Line(l.productId(),l.quantity())).sorted(Comparator.comparing(l->l.productId().toString())).toList(),input.lines()));
         return reservation;
     }
     public UUID register(Saga saga,String key,String trace) {
-        JsonNode r=request(sales,"/api/v1/sales","POST",Map.of("customerId",saga.input().customerId(),"createdBy",saga.initiatedBy(),"details",saga.reservation().lines()),key,trace);
+        JsonNode r=request(sales,"/api/v1/sales","POST",Map.of("customerId",saga.input().customerId(),"createdBy",saga.initiatedBy(),"details",saga.reservation().lines()),key,trace,Set.of(400,422));
         validate(()->{
             uuid(r,"saleId");equal(uuid(r,"customerId"),saga.input().customerId());equal(uuid(r,"createdBy"),saga.initiatedBy());date(r,"date");equal(bool(r,"active"),true);
             JsonNode details=array(r,"details");equal(details.size(),saga.reservation().lines().size());
@@ -50,12 +50,12 @@ public final class HttpSaleParticipants implements SaleParticipants {
         return uuid(r,"saleId");
     }
     public void release(Reservation original,String key,String trace) {
-        JsonNode read=request(products,"/api/v1/stock-reservations/"+original.reservationId(),"GET",null,key,trace);
+        JsonNode read=request(products,"/api/v1/stock-reservations/"+original.reservationId(),"GET",null,key,trace,Set.of(404));
         String status=read.path("status").asText();
         Reservation current=parseReservation(read,status);
         validate(()->equal(current,original));
         if(status.equals("RELEASED"))return;
-        Reservation released=parseReservation(request(products,"/api/v1/stock-reservations/"+original.reservationId()+"/release","POST",null,key,trace),"RELEASED");
+        Reservation released=parseReservation(request(products,"/api/v1/stock-reservations/"+original.reservationId()+"/release","POST",null,key,trace,Set.of(404)),"RELEASED");
         validate(()->equal(released,original));
     }
     private Reservation parseReservation(JsonNode r,String expectedStatus) {
@@ -72,7 +72,7 @@ public final class HttpSaleParticipants implements SaleParticipants {
             return new Reservation(uuid(r,"reservationId"),lines);
         }catch(Exception e){throw new ParticipantFailure(ParticipantFailure.Kind.INVALID_RESPONSE);}
     }
-    private JsonNode request(URI base,String path,String method,Object body,String key,String trace) {
+    private JsonNode request(URI base,String path,String method,Object body,String key,String trace,Set<Integer> confirmedRejections) {
         CompletableFuture<HttpResponse<byte[]>> pending=null;
         try {
             String credential=token.get();if(credential==null || credential.isBlank())throw new ParticipantFailure(ParticipantFailure.Kind.AUTHORIZATION);
@@ -84,8 +84,8 @@ public final class HttpSaleParticipants implements SaleParticipants {
             HttpResponse<byte[]> response=pending.get(timeout.toMillis(),TimeUnit.MILLISECONDS);
             int code=response.statusCode();
             if(code==401||code==403)throw new ParticipantFailure(ParticipantFailure.Kind.AUTHORIZATION);
-            if(code==429||code>=500)throw new ParticipantFailure(ParticipantFailure.Kind.TRANSIENT);
-            if(code>=400&&code<500)throw new ParticipantFailure(ParticipantFailure.Kind.REJECTED);
+            if(Set.of(408,429,500,502,503,504).contains(code))throw new ParticipantFailure(ParticipantFailure.Kind.TRANSIENT);
+            if(confirmedRejections.contains(code))throw new ParticipantFailure(ParticipantFailure.Kind.REJECTED);
             if(code!=200&&code!=201)throw new ParticipantFailure(ParticipantFailure.Kind.INVALID_RESPONSE);
             try{return json.readTree(response.body());}catch(Exception e){throw new ParticipantFailure(ParticipantFailure.Kind.INVALID_RESPONSE);}
         }catch(ParticipantFailure e){throw e;}
