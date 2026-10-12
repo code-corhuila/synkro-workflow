@@ -36,6 +36,7 @@ class HttpSaleParticipantsTest {
         body=body.replace("true","false");
         assertThatThrownBy(()->client.validateCustomer(customer,"key","trace")).isInstanceOf(ParticipantFailure.class)
             .extracting(e->((ParticipantFailure)e).kind()).isEqualTo(ParticipantFailure.Kind.REJECTED);
+        status=404;assertThatThrownBy(()->client.validateCustomer(customer,"key","trace")).hasMessage("REJECTED");
     }
     @Test void reserveSendsAllLinesAndChecksFrozenPricesAndMatchingInput() {
         body=reservationBody("RESERVED");status=201;
@@ -52,6 +53,7 @@ class HttpSaleParticipantsTest {
         assertThat(sentBody).contains("\"createdBy\":\""+caller+"\"","\"unitPriceCents\":125").doesNotContain("subtotalCents","totalCents");
         body=body.replace("\"totalCents\":250","\"totalCents\":251");
         assertThatThrownBy(()->client.register(saga,"key","trace")).isInstanceOf(ParticipantFailure.class);
+        status=404;assertThatThrownBy(()->client.register(saga,"key","trace")).hasMessage("INVALID_RESPONSE");
     }
     @Test void allNormalizedLinesTravelInOneReservationOperation() throws Exception {
         UUID second=UUID.randomUUID();SaleInput command=new SaleInput(customer,List.of(new SaleInput.Line(second,1),new SaleInput.Line(product,2)));
@@ -66,12 +68,13 @@ class HttpSaleParticipantsTest {
     @Test void readReleasedReservationAvoidsRepeatRelease() {
         body=reservationBody("RELEASED");client.release(new Reservation(reservation,List.of(new Reservation.Line(product,2,125))),"saga:release-stock","trace");
         assertThat(seen).hasSize(1);assertThat(seen.getFirst()).startsWith("GET /api/v1/stock-reservations/"+reservation);
+        status=404;assertThatThrownBy(()->client.release(new Reservation(reservation,List.of(new Reservation.Line(product,2,125))),"key","trace")).hasMessage("REJECTED");
     }
     @Test void statusClassificationAndSafeErrors() {
         body="sentinel-driver-password-url";
         for(int code:List.of(400,404,422,401,403,408,429,500,502,503,504,501,505,409,415,418)) {
             status=code;
-            ParticipantFailure.Kind expected=code==401||code==403?ParticipantFailure.Kind.AUTHORIZATION:Set.of(408,429,500,502,503,504).contains(code)?ParticipantFailure.Kind.TRANSIENT:Set.of(400,404,422).contains(code)?ParticipantFailure.Kind.REJECTED:ParticipantFailure.Kind.INVALID_RESPONSE;
+            ParticipantFailure.Kind expected=code==401||code==403?ParticipantFailure.Kind.AUTHORIZATION:Set.of(408,429,500,502,503,504).contains(code)?ParticipantFailure.Kind.TRANSIENT:Set.of(400,422).contains(code)?ParticipantFailure.Kind.REJECTED:ParticipantFailure.Kind.INVALID_RESPONSE;
             assertThatThrownBy(()->client.reserve(input,"key","trace")).isInstanceOf(ParticipantFailure.class)
                 .hasMessage(expected.name()).extracting(e->((ParticipantFailure)e).kind()).isEqualTo(expected);
         }
