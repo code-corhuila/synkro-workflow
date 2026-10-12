@@ -147,6 +147,11 @@ def execute(image=None):
             check(fixture('/state')['counts']==dict(reserve=1,sale=0,release=1),'controlled confirmed failure compensates exactly once')
             location=start('sale-lost');wait(lambda:completed(location,'COMPLETED'))
             check(fixture('/state')['counts']==dict(reserve=1,sale=1,release=0),'lost committed Sales response replays without duplicate or release')
+            location=start('sale-timeout-status');wait(lambda:completed(location,'COMPLETED'))
+            check(fixture('/state')['counts']==dict(reserve=1,sale=1,release=0),'committed sale followed by HTTP 408 resolves idempotently without release')
+            location=start('sale-undocumented-conflict')
+            wait(lambda:sql("SELECT error_detail FROM workflow_schema.saga_instance WHERE saga_id='"+location.split('/')[-1]+"'")=='OUTCOME_UNRESOLVED')
+            check(request(location)['body']['status']=='RUNNING' and fixture('/state')['counts']['release']==0,'undocumented Sales response preserves ambiguous committed outcome and stock')
             for mode,status in [('reserve-pause','COMPLETED'),('sale-pause','COMPLETED'),('release-pause','COMPENSATED')]:
                 location=start(mode);wait(lambda:fixture('/state')['paused'])
                 run(['docker','kill',app]);run(['docker','start',app]);wait(lambda:request('/health',auth=False)['status']==200,90)
