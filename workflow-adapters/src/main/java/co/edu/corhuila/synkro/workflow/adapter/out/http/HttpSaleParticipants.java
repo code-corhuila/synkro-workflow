@@ -3,6 +3,8 @@ package co.edu.corhuila.synkro.workflow.adapter.out.http;
 import co.edu.corhuila.synkro.workflow.domain.model.*;
 import co.edu.corhuila.synkro.workflow.application.port.out.*;
 import com.fasterxml.jackson.databind.*;
+import com.fasterxml.jackson.core.*;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.*;
 import java.nio.ByteBuffer;
@@ -73,29 +75,76 @@ public final class HttpSaleParticipants implements SaleParticipants {
         }catch(Exception e){throw new ParticipantFailure(ParticipantFailure.Kind.INVALID_RESPONSE);}
     }
     private JsonNode request(URI base,String path,String method,Object body,String key,String trace,Set<Integer> confirmedRejections) {
-        CompletableFuture<HttpResponse<byte[]>> pending=null;
+        HttpRequest request;
         try {
             String credential=token.get();if(credential==null || credential.isBlank())throw new ParticipantFailure(ParticipantFailure.Kind.AUTHORIZATION);
             var builder=HttpRequest.newBuilder(base.resolve(path)).timeout(timeout)
                 .header("Authorization","Bearer "+credential).header("Idempotency-Key",key).header("X-Correlation-Id",trace).header("Accept","application/json");
             if(method.equals("GET"))builder.GET();
             else builder.header("Content-Type","application/json").POST(body==null?HttpRequest.BodyPublishers.noBody():HttpRequest.BodyPublishers.ofByteArray(json.writeValueAsBytes(body)));
-            pending=client.sendAsync(builder.build(),info->new LimitedBody());
+            request=builder.build();
+        }catch(ParticipantFailure failure){throw failure;}
+        catch(JsonProcessingException|RuntimeException failure){throw new ParticipantFailure(ParticipantFailure.Kind.LOCAL_FAILURE);}
+        CompletableFuture<HttpResponse<byte[]>> pending=null;
+        try {
+            pending=client.sendAsync(request,info->new LimitedBody());
             HttpResponse<byte[]> response=pending.get(timeout.toMillis(),TimeUnit.MILLISECONDS);
             int code=response.statusCode();
             if(code==401||code==403)throw new ParticipantFailure(ParticipantFailure.Kind.AUTHORIZATION);
             if(Set.of(408,429,500,502,503,504).contains(code))throw new ParticipantFailure(ParticipantFailure.Kind.TRANSIENT);
-            if(confirmedRejections.contains(code))throw new ParticipantFailure(ParticipantFailure.Kind.REJECTED);
+            if(confirmedRejections.contains(code)) {
+                validateRejection(response,code,trace);
+                throw new ParticipantFailure(ParticipantFailure.Kind.REJECTED);
+            }
             if(code!=200&&code!=201)throw new ParticipantFailure(ParticipantFailure.Kind.INVALID_RESPONSE);
-            try{return json.readTree(response.body());}catch(Exception e){throw new ParticipantFailure(ParticipantFailure.Kind.INVALID_RESPONSE);}
+            return responseJson(response.body());
         }catch(ParticipantFailure e){throw e;}
-        catch(InterruptedException e){Thread.currentThread().interrupt();throw new ParticipantFailure(ParticipantFailure.Kind.TRANSIENT);}
-        catch(Exception e){
-            System.getLogger(HttpSaleParticipants.class.getName()).log(System.Logger.Level.WARNING,"Participant transport failure: "+e.getClass().getSimpleName());
-            throw new ParticipantFailure(ParticipantFailure.Kind.TRANSIENT);
-        }
+        catch(TimeoutException e){throw new ParticipantFailure(ParticipantFailure.Kind.TRANSIENT);}
+        catch(InterruptedException e){Thread.currentThread().interrupt();throw new ParticipantFailure(ParticipantFailure.Kind.LOCAL_FAILURE);}
+        catch(ExecutionException e){throw asynchronousFailure(e.getCause());}
+        catch(RuntimeException e){throw new ParticipantFailure(ParticipantFailure.Kind.LOCAL_FAILURE);}
         finally {if(pending!=null&&!pending.isDone())pending.cancel(true);}
     }
+    private JsonNode responseJson(byte[] bytes) {
+        try(var parser=json.getFactory().createParser(bytes)) {
+            parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+            JsonNode value=json.readTree(parser);
+            if(value==null || !value.isObject() || parser.nextToken()!=null)throw new ParticipantFailure(ParticipantFailure.Kind.INVALID_RESPONSE);
+            return value;
+        }catch(IOException e){throw new ParticipantFailure(ParticipantFailure.Kind.INVALID_RESPONSE);}
+    }
+    private void validateRejection(HttpResponse<byte[]> response,int status,String trace) {
+        JsonNode envelope=responseJson(response.body());
+        validate(()->{
+            equal(response.headers().firstValue("Content-Type").orElse("").split(";",2)[0].trim().toLowerCase(Locale.ROOT),"application/json");
+            String code=text(envelope,"error");text(envelope,"message");equal(text(envelope,"traceId"),trace);
+            Set<String> allowed=switch(status) {
+                case 400 -> Set.of("VALIDATION_ERROR");
+                case 404 -> Set.of("NOT_FOUND");
+                case 422 -> Set.of("BUSINESS_RULE_VIOLATION","INVALID_STATUS_TRANSITION");
+                default -> Set.of();
+            };
+            if(!allowed.contains(code))throw new IllegalArgumentException();
+            JsonNode details=envelope.get("details");
+            if(details!=null) {
+                if(!details.isArray())throw new IllegalArgumentException();
+                for(JsonNode detail:details){text(detail,"field");text(detail,"message");}
+            }
+        });
+    }
+    private static ParticipantFailure asynchronousFailure(Throwable failure) {
+        while((failure instanceof CompletionException || failure instanceof ExecutionException) && failure.getCause()!=null)failure=failure.getCause();
+        // Contract/configuration failures can be nested inside a transport wrapper.
+        var visited=Collections.newSetFromMap(new IdentityHashMap<Throwable,Boolean>());
+        for(Throwable cause=failure;cause!=null && visited.add(cause);cause=cause.getCause()) {
+            if(cause instanceof ResponseLimitExceeded || cause instanceof java.net.ProtocolException)
+                return new ParticipantFailure(ParticipantFailure.Kind.INVALID_RESPONSE);
+            if(cause instanceof javax.net.ssl.SSLException || cause instanceof java.net.UnknownHostException || cause instanceof java.nio.channels.UnresolvedAddressException)
+                return new ParticipantFailure(ParticipantFailure.Kind.LOCAL_FAILURE);
+        }
+        return new ParticipantFailure(failure instanceof IOException?ParticipantFailure.Kind.TRANSIENT:ParticipantFailure.Kind.LOCAL_FAILURE);
+    }
+    private static final class ResponseLimitExceeded extends RuntimeException {}
     private static final class LimitedBody implements HttpResponse.BodySubscriber<byte[]> {
         final HttpResponse.BodySubscriber<byte[]> delegate=HttpResponse.BodySubscribers.ofByteArray();
         Flow.Subscription subscription;int size;
@@ -103,7 +152,7 @@ public final class HttpSaleParticipants implements SaleParticipants {
         public void onSubscribe(Flow.Subscription s){subscription=s;delegate.onSubscribe(s);}
         public void onNext(List<ByteBuffer> buffers){
             for(var b:buffers)size+=b.remaining();
-            if(size>1048576){subscription.cancel();delegate.onError(new IllegalArgumentException("Response limit"));return;}
+            if(size>1048576){subscription.cancel();delegate.onError(new ResponseLimitExceeded());return;}
             delegate.onNext(buffers);
         }
         public void onError(Throwable t){delegate.onError(t);}
