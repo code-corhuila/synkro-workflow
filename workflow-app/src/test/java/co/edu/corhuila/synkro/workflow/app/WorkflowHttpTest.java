@@ -48,6 +48,13 @@ class WorkflowHttpTest {
         Signature signature=Signature.getInstance("SHA256withRSA");signature.initSign(keys.getPrivate());signature.update(value.getBytes(StandardCharsets.UTF_8));
         return value+"."+Base64.getUrlEncoder().withoutPadding().encodeToString(signature.sign());
     }
+    String otherCaller() throws Exception {
+        String[] pieces=jwt("ADMIN").split("\\.");var mapper=new com.fasterxml.jackson.databind.ObjectMapper();
+        var payload=(com.fasterxml.jackson.databind.node.ObjectNode)mapper.readTree(Base64.getUrlDecoder().decode(pieces[1]));payload.put("sub",UUID.randomUUID().toString());
+        String value=pieces[0]+"."+Base64.getUrlEncoder().withoutPadding().encodeToString(mapper.writeValueAsBytes(payload));
+        Signature signature=Signature.getInstance("SHA256withRSA");signature.initSign(keys.getPrivate());signature.update(value.getBytes(StandardCharsets.UTF_8));
+        return value+"."+Base64.getUrlEncoder().withoutPadding().encodeToString(signature.sign());
+    }
     ResponseEntity<String> request(String path,HttpMethod method,String token,String key,String body){
         var h=new HttpHeaders();h.setContentType(MediaType.APPLICATION_JSON);h.set("X-Correlation-Id","http-trace");
         if(token!=null)h.setBearerAuth(token);if(key!=null)h.set("Idempotency-Key",key);
@@ -85,10 +92,14 @@ class WorkflowHttpTest {
         assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         String location=first.getHeaders().getFirst("Location");assertThat(location).startsWith("/api/v1/sagas/");
         assertThat(first.getBody()).contains("\"sagaType\":\"register-sale\"").doesNotContain("input","step_results","error_detail","execution","initiatedBy","service-sentinel");
-        var replay=request("/api/v1/sagas/register-sale",HttpMethod.POST,jwt("ADMIN"),key,input());assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
+        var replay=request("/api/v1/sagas/register-sale",HttpMethod.POST,jwt("ADMIN"),key,input().replace(customer.toString(),customer.toString().toUpperCase(Locale.ROOT)).replace(",",",\n  "));assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(request(location,HttpMethod.GET,jwt("SALESPERSON"),null,null).getStatusCode()).isEqualTo(HttpStatus.OK);
         var conflict=request("/api/v1/sagas/register-sale",HttpMethod.POST,jwt("ADMIN"),key,input().replace("\"quantity\":2","\"quantity\":3"));
         assertThat(conflict.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);assertThat(conflict.getBody()).doesNotContain(location.substring(location.lastIndexOf('/')+1),customer.toString());
+        String other=otherCaller();var foreignReplay=request("/api/v1/sagas/register-sale",HttpMethod.POST,other,key,input());
+        assertThat(foreignReplay.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(foreignReplay.getBody()).doesNotContain(location.substring(location.lastIndexOf('/')+1),caller.toString(),customer.toString(),other);
+        assertThat(request(location,HttpMethod.GET,other,null,null).getStatusCode()).isEqualTo(HttpStatus.OK);
     }
     @Test void malformedRequestsCannotReachParticipants(){
         for(String body:List.of("{bad","{}",input().replace("\"quantity\":2","\"quantity\":0"),input().replace("\"quantity\":2","\"quantity\":1.5"),input().replace(customer.toString(),"1-1-1-1-1"))) {
