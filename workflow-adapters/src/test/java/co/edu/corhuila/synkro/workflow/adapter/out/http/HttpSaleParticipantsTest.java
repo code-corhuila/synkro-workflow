@@ -53,6 +53,16 @@ class HttpSaleParticipantsTest {
         body=body.replace("\"totalCents\":250","\"totalCents\":251");
         assertThatThrownBy(()->client.register(saga,"key","trace")).isInstanceOf(ParticipantFailure.class);
     }
+    @Test void allNormalizedLinesTravelInOneReservationOperation() throws Exception {
+        UUID second=UUID.randomUUID();SaleInput command=new SaleInput(customer,List.of(new SaleInput.Line(second,1),new SaleInput.Line(product,2)));
+        var mapper=JsonMapper.builder().build();var response=mapper.readTree(reservationBody("RESERVED"));
+        ((com.fasterxml.jackson.databind.node.ArrayNode)response.get("lines")).addObject().put("lineId",UUID.randomUUID().toString()).put("productId",second.toString()).put("quantity",1).put("unitPriceCents",200);
+        body=mapper.writeValueAsString(response);status=201;
+        Reservation result=client.reserve(command,"saga:reserve-stock","trace");
+        assertThat(result.lines().stream().map(l->new SaleInput.Line(l.productId(),l.quantity())).toList()).isEqualTo(command.lines());
+        assertThat(seen).hasSize(1);assertThat(mapper.readTree(sentBody).get("lines").size()).isEqualTo(2);
+        assertThat(sentBody).contains(product.toString(),second.toString()).doesNotContain("unitPriceCents","createdBy");
+    }
     @Test void readReleasedReservationAvoidsRepeatRelease() {
         body=reservationBody("RELEASED");client.release(new Reservation(reservation,List.of(new Reservation.Line(product,2,125))),"saga:release-stock","trace");
         assertThat(seen).hasSize(1);assertThat(seen.getFirst()).startsWith("GET /api/v1/stock-reservations/"+reservation);
