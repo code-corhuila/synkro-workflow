@@ -35,7 +35,7 @@ class DeploymentTest(unittest.TestCase):
         self.assertEqual(config['environments']['default']['schemas'], ['workflow_schema'])
         self.assertEqual(config['flyway']['defaultSchema'], 'workflow_schema')
         self.assertTrue(config['flyway']['cleanDisabled'])
-        self.assertLessEqual(config['flyway']['connectRetries'], 5)
+        self.assertLessEqual(config['environments']['default']['connectRetries'], 5)
         self.assertNotIn('workflow-db:', (ROOT / 'deploy/compose.yml').read_text())
     def test_no_automatic_migration_and_readonly_sql(self):
         properties = (ROOT / 'workflow-app/src/main/resources/application.properties').read_text()

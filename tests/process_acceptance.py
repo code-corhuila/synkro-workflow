@@ -20,7 +20,7 @@ PYTHON='python:3.13.7-alpine3.22'
 
 def run(args,*,data=None,env=None,timeout=180,success=True):
     result=subprocess.run(args,input=data,capture_output=True,env=env,timeout=timeout)
-    if success and result.returncode:raise RuntimeError('Required command failed; raw diagnostics suppressed')
+    if success and result.returncode:raise RuntimeError('Required command failed; command family '+args[1]+'; raw diagnostics suppressed')
     return result
 def check(condition,label):
     if not condition:raise RuntimeError(label)
@@ -103,16 +103,13 @@ def execute(image=None):
             run(compose+['run','--rm','--no-deps','workflow-db-migrate'],env=env,timeout=120)
             check(sql("SELECT count(*) FROM workflow_schema.flyway_schema_history WHERE success AND version IS NOT NULL")=='5','disposable rollback and rebuild')
             if owns_image:run(['docker','build','--label','synkro.execution='+identity,'-t',image,'-f',str(ROOT/'deploy/Dockerfile'),str(ROOT)],timeout=900)
-            participants=container('participants',PYTHON,['--network-alias','participants','-v',str(folder)+':/fixtures:ro','--entrypoint','python','--workdir','/fixtures'])
-            # The image command is replaced below using create/start, keeping args before the image.
-            run(['docker','rm','-f',participants]);containers.remove(participants)
             participants=project+'-participants'
             run(['docker','run','-d','--name',participants,'--label','synkro.execution='+identity,'--label','synkro.disposable=true','--network',network,'--network-alias','participants','-v',str(folder)+':/fixtures:ro',PYTHON,'python','/fixtures/participants.py']);containers.append(participants)
             wait(lambda:fixture('/health')['status']=='ok')
             app=container('workflow',image,['--network-alias','workflow','-v',str(folder/'public.pem')+':/run/public.pem:ro','-v',str(folder/'password')+':/run/password:ro',
                 '-e','WORKFLOW_DATABASE_URL=jdbc:postgresql://synkro-db:5432/synkro','-e','WORKFLOW_APP_PASSWORD_FILE=/run/password','-e','JWT_PUBLIC_KEY_FILE=/run/public.pem',
                 '-e','SERVICE_TOKEN='+service,'-e','CUSTOMERS_BASE_URL=http://participants:8080','-e','PRODUCTS_BASE_URL=http://participants:8080','-e','SALES_BASE_URL=http://participants:8080',
-                '-e','WORKFLOW_RESPONSE_TIMEOUT_MS=100','-e','WORKFLOW_SCAN_INTERVAL_MS=200'])
+                '-e','WORKFLOW_RESPONSE_TIMEOUT_MS=100','-e','WORKFLOW_SCAN_INTERVAL_MS=60000'])
             wait(lambda:request('/health',auth=False)['status']==200,90)
             location=start('normal');wait(lambda:completed(location,'COMPLETED'))
             check(fixture('/state')['counts']==dict(reserve=1,sale=1,release=0),'controlled complete register-sale against real store/process')
@@ -126,9 +123,12 @@ def execute(image=None):
                 wait(lambda:completed(location,status),45)
                 expected=dict(reserve=1,sale=0 if status=='COMPENSATED' else 1,release=1 if status=='COMPENSATED' else 0)
                 check(fixture('/state')['counts']==expected,'real JVM interruption after external commit '+mode)
-            location=start('reserve-pause');wait(lambda:fixture('/state')['paused']);sql('REVOKE UPDATE ON workflow_schema.saga_instance FROM workflow_writer')
-            time.sleep(4);check(fixture('/state')['counts']['sale']==0,'store write failure prevents next external step')
-            sql('GRANT UPDATE ON workflow_schema.saga_instance TO workflow_writer');run(['docker','kill',app]);run(['docker','start',app])
+            # Disposable fault injection rejects exactly the local reservation-result
+            # write, after Products commits. It is never a production migration.
+            sql("CREATE FUNCTION workflow_schema.test_fail_result() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.completed_steps @> ARRAY['reserve-stock']::text[] THEN RAISE EXCEPTION 'Disposable result write fault'; END IF; RETURN NEW; END $$; CREATE TRIGGER test_fail_result BEFORE UPDATE ON workflow_schema.saga_instance FOR EACH ROW EXECUTE FUNCTION workflow_schema.test_fail_result()")
+            location=start('normal');wait(lambda:fixture('/state')['counts']['reserve']==1)
+            check(fixture('/state')['counts']['sale']==0,'store result write failure prevents next external step')
+            sql('DROP TRIGGER test_fail_result ON workflow_schema.saga_instance; DROP FUNCTION workflow_schema.test_fail_result()');run(['docker','kill',app]);run(['docker','start',app])
             wait(lambda:completed(location,'COMPLETED'),90);check(fixture('/state')['counts']['reserve']==1,'restart after store write failure replays reservation')
             location=start('sale-ambiguous');wait(lambda:sql("SELECT error_detail FROM workflow_schema.saga_instance WHERE saga_id='"+location.split('/')[-1]+"'")=='OUTCOME_UNRESOLVED')
             check(request(location)['body']['status']=='RUNNING' and fixture('/state')['counts']['release']==0,'ambiguous sale remains recoverable RUNNING without release')

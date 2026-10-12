@@ -12,11 +12,11 @@ import java.util.concurrent.atomic.*;
 import static org.assertj.core.api.Assertions.*;
 
 class HttpSaleParticipantsTest {
-    HttpServer server; HttpSaleParticipants client;
+    HttpServer server; HttpSaleParticipants client; HttpClient transport; java.util.concurrent.ExecutorService fixtureExecutor;
     final UUID customer=UUID.randomUUID(),product=UUID.randomUUID(),reservation=UUID.randomUUID(),sale=UUID.randomUUID(),caller=UUID.randomUUID();
     final SaleInput input=new SaleInput(customer,List.of(new SaleInput.Line(product,2)));
-    final List<String> seen=new ArrayList<>();
-    int status=200; String body; String sentBody;
+    final List<String> seen=new java.util.concurrent.CopyOnWriteArrayList<>();
+    volatile int status=200; volatile String body; volatile String sentBody;
     String reservationBody(String status) {return "{\"reservationId\":\""+reservation+"\",\"status\":\""+status+"\",\"createdAt\":\"2026-10-12T12:00:00Z\",\"releasedAt\":\"2026-10-12T12:01:00Z\",\"lines\":[{\"lineId\":\""+UUID.randomUUID()+"\",\"productId\":\""+product+"\",\"quantity\":2,\"unitPriceCents\":125}]}";}
     @BeforeEach void setup() throws Exception {
         server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
@@ -24,11 +24,11 @@ class HttpSaleParticipantsTest {
             seen.add(exchange.getRequestMethod()+" "+exchange.getRequestURI()+" "+exchange.getRequestHeaders().getFirst("Authorization")+" "+exchange.getRequestHeaders().getFirst("Idempotency-Key")+" "+exchange.getRequestHeaders().getFirst("X-Correlation-Id"));
             sentBody=new String(exchange.getRequestBody().readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);
             byte[] bytes=body.getBytes(java.nio.charset.StandardCharsets.UTF_8);exchange.sendResponseHeaders(status,bytes.length);exchange.getResponseBody().write(bytes);exchange.close();
-        });server.start();
+        });fixtureExecutor=java.util.concurrent.Executors.newCachedThreadPool();server.setExecutor(fixtureExecutor);server.start();
         URI base=URI.create("http://127.0.0.1:"+server.getAddress().getPort());
-        client=new HttpSaleParticipants(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).followRedirects(HttpClient.Redirect.NEVER).build(),JsonMapper.builder().build(),base,base,base,()->"service-sentinel",Duration.ofSeconds(3));
+        transport=HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(2)).followRedirects(HttpClient.Redirect.NEVER).build(); client=new HttpSaleParticipants(transport,JsonMapper.builder().build(),base,base,base,()->"service-sentinel",Duration.ofSeconds(10));
     }
-    @AfterEach void stop(){server.stop(0);}
+    @AfterEach void stop(){transport.close();server.stop(0);fixtureExecutor.shutdownNow();}
     @Test void customerCredentialCorrelationAndActiveValidation() {
         body="{\"customerId\":\""+customer+"\",\"name\":\"Buyer\",\"identityDocument\":\"123\",\"registrationDate\":\"2026-10-12T12:00:00Z\",\"active\":true}";
         client.validateCustomer(customer,"saga:validate-customer","trace");
