@@ -5,3 +5,7 @@
 .git/
 **/*.md
 .github/
+.contract-sources/
+.tools/
+.evidence*
+tests/
