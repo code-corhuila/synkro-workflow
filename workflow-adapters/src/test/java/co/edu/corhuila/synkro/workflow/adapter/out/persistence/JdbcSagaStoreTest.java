@@ -97,4 +97,23 @@ class JdbcSagaStoreTest {
         }
         assertThat(store.find(saga.id()).orElseThrow().execution().pendingStep()).isNull();
     }
+    @Test void checksumProtectionAndDisposableRollbackRebuild() throws Exception {
+        Path copy=Files.createTempDirectory("workflow-checksum-");
+        try {
+            try(var paths=Files.walk(ROOT.resolve("db"))) {
+                for(Path path:paths.toList()) {
+                    Path target=copy.resolve("db").resolve(ROOT.resolve("db").relativize(path));
+                    if(Files.isDirectory(path))Files.createDirectories(target);else Files.copy(path,target);
+                }
+            }
+            Files.writeString(copy.resolve("db/01_ddl/03_tables/V002__create_saga_instance.sql"),"\n-- changed checksum\n",StandardOpenOption.APPEND);
+            assertThatThrownBy(()->migration(copy).validate()).isInstanceOf(org.flywaydb.core.api.FlywayException.class);
+        } finally {
+            try(var paths=Files.walk(copy)){for(Path path:paths.sorted(Comparator.reverseOrder()).toList())Files.delete(path);}
+        }
+        var scripts=new ArrayList<Path>();try(var paths=Files.walk(ROOT.resolve("db/05_rollbacks"))){paths.filter(p->p.toString().endsWith(".sql")).forEach(scripts::add);}
+        scripts.sort(Comparator.comparing((Path p)->p.getFileName().toString()).reversed());
+        for(Path script:scripts){if(script.getFileName().toString().startsWith("U001"))sql("DROP TABLE workflow_schema.flyway_schema_history");sql(Files.readString(script));}
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(5);assertThat(store.healthy()).isTrue();
+    }
 }
