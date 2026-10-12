@@ -5,24 +5,27 @@
 Part of the **SynkroTech SAS Sales Management System** â€” organization `code-corhuila`.
 Governance and documentation live in [`synkro-docs`](https://github.com/code-corhuila/synkro-docs).
 
-## Running locally
+## Register-sale Workflow
+
+The Maven modules retain hexagonal ownership: workflow-core contains domain/use cases/ports; workflow-adapters contains HTTP/security, participant clients and PostgreSQL persistence; workflow-app composes dependencies and the bounded background lifecycle.
+
+POST /api/v1/sagas/register-sale authenticates ADMIN/SALESPERSON with local Auth RS256 verification, validates 1–100 UUID product lines and positive integer quantities, and creates a durable resource before any external effect. First creation returns 201 with Location; equivalent caller/input replay returns 200. The approved conflicting replay policy is generic 403 for another caller and 400 for different normalized input. GET /api/v1/sagas/{id} returns only the documented public projection.
+
+Read [execution design](docs/persistent-register-sale-design.md), [deployment and recovery](docs/deployment-and-recovery.md), and the [prepared documentation handoff](docs/synkro-docs-handoff.md). Populate protected placeholders from .env.example. Bootstrap workflow_app through infrastructure, run the owning workflow-db-migrate tooling service against shared synkro-db, then start Workflow on internal 8080. Public /health checks the actual saga store.
+
+## Validation
 
 ```bash
-mvn install -DskipTests
-mvn -pl workflow-app spring-boot:run
+mvn -B verify
+python tests/check_coverage.py
+python -m unittest discover -s tests -p test_deployment.py
+python -m pip install cryptography==46.0.3
+python tests/process_acceptance.py
 ```
 
-The service listens on `:8080`. Verify it:
+The owner CI needs no private sibling checkout. The process suite uses disposable real PostgreSQL and the actual Workflow JVM with controlled HTTP participants, including interruption after effects commit and failed local result writes. It removes its owned resources.
 
-```bash
-curl http://localhost:8080/health
-```
-
-## Running the tests
-
-```bash
-mvn -pl workflow-app -am test
-```
+For local hybrid evidence, use clean immutable participant snapshots and run python tests/hybrid_acceptance.py --workspace /path/to/snapshots. Exact pins are checked before execution. Current Customers GET remains 501; controlled Customers with real Products/Sales is hybrid evidence. Fully real acceptance and HU closure remain blocked until the owner supplies that operation and the complete scenario is rerun.
 
 ## Branching
 
