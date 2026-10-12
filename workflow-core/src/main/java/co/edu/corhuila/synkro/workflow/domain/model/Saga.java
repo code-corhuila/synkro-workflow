@@ -9,7 +9,11 @@ public record Saga(UUID id, String idempotencyKey, UUID initiatedBy, SaleInput i
                    Execution execution, Instant createdAt, Instant updatedAt) {
     public enum Status { RUNNING, COMPLETED, COMPENSATED, FAILED }
     public record Execution(String correlationId, String pendingStep, int attempts) {}
-    public Saga { completedSteps=List.copyOf(completedSteps); }
+    public Saga {
+        completedSteps=List.copyOf(completedSteps);
+        createdAt=createdAt.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        updatedAt=updatedAt.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+    }
     public static Saga create(UUID id,String key,UUID caller,SaleInput input,String trace,Instant now) {
         if(key==null || key.length()<8 || key.length()>128 || caller==null || trace==null)
             throw new WorkflowError("VALIDATION_ERROR");
