@@ -50,7 +50,7 @@ class Handler(BaseHTTPRequestHandler):
                 with urlopen(request,timeout=10) as response:return self.reply(200,{'status':response.status,'headers':dict(response.headers),'body':response_body(response)})
             except HTTPError as error:return self.reply(200,{'status':error.code,'headers':dict(error.headers),'body':response_body(error)})
         if self.headers.get('Authorization')!='Bearer '+config['service']:return self.reply(403,{'error':'FORBIDDEN'})
-        key=self.headers.get('Idempotency-Key');pause=False;lost=False;timeout_status=False;conflict_status=False
+        key=self.headers.get('Idempotency-Key');pause=False;lost=False;timeout_status=False;conflict_status=False;invalid_rejection=False
         with lock:
             mode=state['mode']
             if self.path=='/api/v1/stock-reservations':
@@ -66,6 +66,7 @@ class Handler(BaseHTTPRequestHandler):
                     details=[dict(line,detailId=str(uuid.uuid4()),subtotalCents=line['quantity']*line['unitPriceCents'],active=True) for line in body['details']]
                     state['sales'][key]=dict(saleId=str(uuid.uuid4()),customerId=body['customerId'],createdBy=body['createdBy'],date=now,totalCents=sum(line['subtotalCents'] for line in details),active=True,details=details)
                     state['counts']['sale']+=1;pause=mode=='sale-pause';lost=mode in ('sale-lost','sale-ambiguous');timeout_status=mode=='sale-timeout-status';conflict_status=mode=='sale-undocumented-conflict'
+                invalid_rejection=mode=='sale-invalid-rejection'
                 result=state['sales'][key];status=201
             elif self.path.startswith('/api/v1/stock-reservations/') and self.path.endswith('/release'):
                 identity=self.path.split('/')[-2]
@@ -80,6 +81,7 @@ class Handler(BaseHTTPRequestHandler):
         if lost:self.close_connection=True;return
         if timeout_status:return self.reply(408,{'error':'INTERNAL_ERROR'})
         if conflict_status:return self.reply(409,{'error':'INTERNAL_ERROR'})
+        if invalid_rejection:return self.reply(422,{'error':'BUSINESS_RULE_VIOLATION'})
         self.reply(status,result)
 
 ThreadingHTTPServer(('0.0.0.0',8080),Handler).serve_forever()

@@ -152,6 +152,11 @@ def execute(image=None):
             location=start('sale-undocumented-conflict')
             wait(lambda:sql("SELECT error_detail FROM workflow_schema.saga_instance WHERE saga_id='"+location.split('/')[-1]+"'")=='OUTCOME_UNRESOLVED')
             check(request(location)['body']['status']=='RUNNING' and fixture('/state')['counts']['release']==0,'undocumented Sales response preserves ambiguous committed outcome and stock')
+            location=start('sale-invalid-rejection')
+            wait(lambda:sql("SELECT error_detail FROM workflow_schema.saga_instance WHERE saga_id='"+location.split('/')[-1]+"'")=='OUTCOME_UNRESOLVED')
+            check(request(location)['body']['status']=='RUNNING' and fixture('/state')['counts']==dict(reserve=1,sale=1,release=0),'committed Sales response with invalid rejection envelope remains recoverable without release')
+            run(['docker','kill',app]);run(['docker','start',app]);wait(lambda:request('/health',auth=False)['status']==200,90)
+            check(request(location)['body']['status']=='RUNNING' and fixture('/state')['counts']==dict(reserve=1,sale=1,release=0),'restart preserves malformed-rejection suspension and reservation')
             for mode,status in [('reserve-pause','COMPLETED'),('sale-pause','COMPLETED'),('release-pause','COMPENSATED')]:
                 location=start(mode);wait(lambda:fixture('/state')['paused'])
                 run(['docker','kill',app]);run(['docker','start',app]);wait(lambda:request('/health',auth=False)['status']==200,90)
