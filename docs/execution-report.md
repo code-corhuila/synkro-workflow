@@ -4,7 +4,7 @@ Responsible: Ángel / AsolanoT. Published story: synkro-docs#243 (verified open)
 
 Starting Workflow develop SHA: 32caf8dc6b4b8b0460b85ab9c0829a3fc974ed37.
 Documentation baseline: 61056c93e6e0783a9199bf56778e9494739bc458.
-Production HTTP/store/lifecycle implementation: beee27dc183bc4cd9f4b9a2ffb2ee980dcb80966. Latest production correction and locally verified Java candidate: 462644e0e79bbfffdefdcdfb8ae6e25ac0122358, following failing status/rejection regressions in 287cb84 and 81b75a5. This delivery cut changes documentation only. Final branch SHAs, chronological full commits and matching remote CI results are supplied in the separate post-push report to avoid a self-referential Git SHA.
+Production HTTP/store/lifecycle implementation: beee27dc183bc4cd9f4b9a2ffb2ee980dcb80966. This scoped continuation starts at efe06565f93e6e56b7010dfd9bf5451f14a03d26 and resolves only the internal WKF-09/WKF-13 protocol gaps. Latest production correction and locally verified candidate: 6f947778bfd795b163ef34cf7f900c12ed3aa864, following committed/executed failing regressions in 0f4e005. Final branch SHAs, chronological full commits and matching remote CI results are supplied in the separate post-push report to avoid a self-referential Git SHA.
 
 ## Architecture and execution
 
@@ -18,8 +18,8 @@ POST owner/input conflict rules are the approved generic 403/400 policy, after a
 
 Test-first commits precede their production fixes: core compile-red then green; JDBC compile-red then real-store green; owning HTTP-client red then green; JWT/HTTP context and behavior red then green; missing deployment runner red then green. Cleanup-recorder import-red is followed by safe implementation and two passing tests. New concurrency tests reject conflicting calls without mutation or participant invocation. Infrastructure preparation startup has its own failing regression before the fix.
 
-Final local Maven verify: 36 tests, zero failures/errors/skips (16 core, 12 adapter including six real PostgreSQL, eight signed-JWT HTTP).
-Published aggregate LINE gates: domain 100.00% (34/34; required 90%), application 98.25% (56/57; required 80%), infrastructure 87.45% (230/263; required 60%), global 90.40% (320/354; required 80%). Existing architecture and UTF-8 checks pass. Deployment contract: two tests pass. Local cleanup registration: two tests pass.
+Final local Maven verify: 43 tests, zero failures/errors/skips (16 core, 19 adapter including six real PostgreSQL, eight signed-JWT HTTP). The 13 affected HTTP participant tests passed after six failing regressions on the previous production implementation. The controlled real-process regression also failed before the fix at the new committed-Sales invalid-envelope window, with disposable cleanup, then passed after the fix.
+Published aggregate LINE gates: domain 100.00% (34/34; required 90%), application 98.11% (52/53; required 80%), infrastructure 89.00% (267/300; required 60%), global 91.21% (353/387; required 80%). Existing architecture and UTF-8 checks pass. Deployment contract and cleanup registration have two passing tests each in the earlier cut; automatic final-SHA CI independently executes them again.
 
 Real PostgreSQL demonstrates five owning migrations, first apply, zero-change replay, workflow_schema history, missing-login rejection, copied-file checksum rejection, descending disposable rollback/rebuild, real application permissions and backend termination/stale-owner rejection. Six concurrent JDBC connections and two independent Workflow JVMs prove unique resource creation and exclusive effects.
 
@@ -49,22 +49,22 @@ Products DB pin: 0beae79920d9af83865bdebaf6b316a2b2a57592. Sales DB pin: 9cfbde7
 | WKF-06 Compensation | PASSED | Controlled/process and hybrid |
 | WKF-07 Compensation failure | PASSED | Bounded core failure, FAILED |
 | WKF-08 Lost response | PASSED | Core and interrupted processes |
-| WKF-09 Ambiguous outcome | BLOCKED | Tested ambiguity preserves stock; malformed rejection-envelope safety remains an internal gap |
+| WKF-09 Ambiguous outcome | PASSED | Validated rejection envelope; malformed committed-Sales rejection retains reservation/RUNNING across real restart |
 | WKF-10 Restart | PASSED | Real JVM forward/release recovery |
 | WKF-11 Persistence failure | PASSED | Core and real result-write fault |
 | WKF-12 Security | PASSED | Real signed JWT, SERVICE clients, hybrid permissions |
-| WKF-13 HTTP contract | BLOCKED | Public HTTP/security tests pass; participant error-envelope validation and exception classification remain internal gaps |
+| WKF-13 HTTP contract | PASSED | Public HTTP/security plus strict participant envelope validation and non-retryable local/contract failures |
 | WKF-14 Health | PASSED | Actual store outage 503; participant outage independent |
 | WKF-15 Migrations/permissions | PASSED | Owning runner and shared-instance suite |
 | WKF-16 Real integration | BLOCKED | Actual Customers 501 |
 
 ## Review and remaining evidence
 
-Delivery cut requested by the owner: no further full local validation and no repetition of tests requiring the missing Customers operation. The final production correction passed all 36 Maven tests and the published coverage gates. Prior controlled real-process and hybrid evidence above remains separately scoped; newly added process assertions for HTTP 408/409, continuation without GET polling and graceful shutdown have not been rerun locally at this cut. Publication CI may execute these assertions automatically, and its exact-SHA result must be reported separately.
+The previous delivery cut efe06565f93e6e56b7010dfd9bf5451f14a03d26 passed its three exact-SHA CI jobs and retained two statically identified protocol gaps. This continuation is explicitly authorized only to resolve those gaps. It revalidated affected tests, all 43 Maven tests, coverage and controlled real PostgreSQL/JVM recovery, including HTTP 408/409, continuation without GET polling, graceful shutdown and the new invalid-rejection interruption case. No actual Customers or fully real acceptance was repeated. Hybrid evidence remains historical and separately scoped.
 
-Internal Workflow follow-ups identified by static inspection, with no new failing test claimed: (1) confirmed participant rejection currently uses the operation's documented HTTP status without validating its required error envelope; malformed or contradictory rejection responses must not authorize unsafe compensation; (2) the broad transport catch classifies unexpected configuration, serialization and response-limit exceptions as transient, and must be narrowed to permitted transient failures. Each follow-up requires a failing regression before its fix. This candidate is not READY FOR MANUAL REVIEW while these protocol gaps remain.
+Both internal follow-ups are resolved with executed red-to-green regressions. Rejection now requires the operation's allowed status, JSON media type, required typed fields, matching correlation, status/error correspondence and valid optional details; duplicate/trailing JSON is invalid. Invalid envelopes do not confirm that Sales rejected a committed operation. Request preparation isolates credential/configuration/serialization failures before transport. Asynchronous protocol/response-limit failures and TLS/hostname/programming failures are non-retryable; only permitted transient HTTP states, wait timeout and transport I/O retry within the existing bound. These failures preserve recoverable RUNNING and reservation, without unsafe compensation or new schema/public policies. Applicable local checks pass; READY FOR MANUAL REVIEW of the implemented scope additionally requires successful CI on the final published SHA. WKF-16 remains explicitly BLOCKED.
 
-Infrastructure handoff: preserve local integration commit a65837d0eabf9fcf4b3491c516723f6152a0be5f and its concurrent ancestor commits. The owning deploy/compose.yml supplies the Workflow service and tooling migration runner on the external platform network, with separate application/administrator credentials and no additional database instance. The infrastructure lock still needs the final published Workflow SHA labeled as a candidate; preserve all six approved complementary pins. Final candidate pinning and matching immutable-snapshot acceptance remain outstanding infrastructure work, not a completed final-SHA validation.
+Infrastructure handoff: local integration commit a65837d0eabf9fcf4b3491c516723f6152a0be5f and its concurrent ancestor commits remain preserved and untouched by this continuation. The owning deploy/compose.yml supplies the Workflow service and tooling migration runner on the external platform network, with separate application/administrator credentials and no additional database instance. This continuation does not pin or approve a Workflow delivery in infrastructure; preserve all six approved complementary pins. Any later reviewed candidate pinning and matching immutable-snapshot acceptance remain separate infrastructure work, not a completed final-SHA validation.
 
 Owner CI is independently executable: Maven, coverage, architecture, deployment and controlled real-process recovery require no private infrastructure checkout or GitHub organization secret. Automatic push CI must be reported on its exact publication SHA; hybrid testing is local-only. Infrastructure integrates the candidate runner/service and keeps all six approved complementary pins.
 
