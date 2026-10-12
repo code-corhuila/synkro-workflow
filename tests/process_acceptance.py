@@ -5,18 +5,32 @@ import argparse
 import base64
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from cryptography.hazmat.primitives.asymmetric import rsa,padding
 from cryptography.hazmat.primitives import hashes,serialization
 
 ROOT=Path(__file__).resolve().parents[1]
 PG='postgres:16.15-alpine3.23'
 PYTHON='python:3.13.7-alpine3.22'
+
+def execution_id():
+    identifier=uuid.uuid4().hex
+    destination=os.environ.get('SYNKRO_LOCAL_OWNER_FILE')
+    if destination:
+        file=Path(destination);parent=file.parent.resolve()
+        try:
+            valid=file.name=='.execution-ids' and re.fullmatch(r'run-[0-9a-f]{32}',parent.name) and (parent/'.local-owner').read_text()==parent.name
+        except OSError:valid=False
+        if not valid:raise RuntimeError('Local cleanup registration refuses unrelated storage')
+        with file.open('a',encoding='utf-8') as output:output.write(identifier+'\n')
+    return identifier
 
 def run(args,*,data=None,env=None,timeout=180,success=True):
     result=subprocess.run(args,input=data,capture_output=True,env=env,timeout=timeout)
@@ -40,7 +54,7 @@ def token(key,subject,roles,permissions):
     signature=key.sign(value.encode(),padding.PKCS1v15(),hashes.SHA256())
     return value+'.'+base64.urlsafe_b64encode(signature).rstrip(b'=').decode()
 def execute(image=None):
-    identity=uuid.uuid4().hex;project='synkro-wkf-'+identity;network=project+'-network'
+    identity=execution_id();project='synkro-wkf-'+identity;network=project+'-network'
     containers=[];owns_image=image is None;image=image or project+':candidate';records=[]
     key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
     caller,customer,product=(str(uuid.uuid4()) for _ in range(3))
@@ -52,7 +66,9 @@ def execute(image=None):
         (folder/'config.json').write_text(json.dumps(dict(human=human,service=service,customer=customer,product=product)))
         shutil.copyfile(ROOT/'tests/controlled_participants.py',folder/'participants.py')
         env=dict(os.environ,COMPOSE_PROJECT_NAME=project,PLATFORM_NETWORK=network,FLYWAY_URL='jdbc:postgresql://synkro-db:5432/synkro?connectTimeout=3&socketTimeout=10',FLYWAY_USER='postgres',FLYWAY_PASSWORD='disposable-admin',WORKFLOW_APP_PASSWORD_PATH=str(folder/'password'),JWT_PUBLIC_KEY_PATH=str(folder/'public.pem'),WORKFLOW_SERVICE_TOKEN=service)
-        compose=['docker','compose','-p',project,'-f',str(ROOT/'deploy/compose.yml'),'--profile','tooling']
+        override=folder/'runner-labels.json'
+        override.write_text(json.dumps({'services':{'workflow-db-migrate':{'labels':{'synkro.execution':identity,'synkro.disposable':'true'}}}}))
+        compose=['docker','compose','-p',project,'-f',str(ROOT/'deploy/compose.yml'),'-f',str(override),'--profile','tooling']
         def container(suffix,image,args):
             name=project+'-'+suffix
             run(['docker','run','-d','--name',name,'--label','synkro.execution='+identity,'--label','synkro.disposable=true','--network',network]+args+[image])
@@ -65,11 +81,11 @@ def execute(image=None):
         def fixture(path,body=None):
             code="import json,urllib.request; r=urllib.request.Request('http://localhost:8080"+path+"',data=None if "+repr(body is None)+" else "+repr(json.dumps(body).encode() if body is not None else b'')+",headers={'Content-Type':'application/json'}); print(urllib.request.urlopen(r,timeout=15).read().decode())"
             return json.loads(run(['docker','exec',participants,'python','-c',code],timeout=30).stdout)
-        def request(path,method='GET',body=None,idempotency=None,auth=True):
+        def request(path,method='GET',body=None,idempotency=None,auth=True,host='workflow'):
             headers={'Content-Type':'application/json','X-Correlation-Id':'process-correlation'}
             if auth:headers['Authorization']='Bearer '+human
             if idempotency:headers['Idempotency-Key']=idempotency
-            return fixture('/probe',dict(url='http://workflow:8080'+path,method=method,body=body,headers=headers))
+            return fixture('/probe',dict(url='http://'+host+':8080'+path,method=method,body=body,headers=headers))
         def completed(location,status):
             response=request(location);return response if response['status']==200 and response['body']['status']==status else None
         def start(mode):
@@ -80,7 +96,7 @@ def execute(image=None):
         try:
             run(['docker','network','create','--label','synkro.execution='+identity,'--label','synkro.disposable=true',network])
             database=container('db',PG,['--network-alias','synkro-db','-e','POSTGRES_DB=synkro','-e','POSTGRES_PASSWORD=disposable-admin'])
-            wait(lambda:run(['docker','exec',database,'pg_isready','-U','postgres','-d','synkro'],success=False,timeout=5).returncode==0)
+            wait(lambda:run(['docker','exec',database,'pg_isready','-h','127.0.0.1','-U','postgres','-d','synkro'],success=False,timeout=5).returncode==0)
             missing=run(compose+['run','--rm','--no-deps','workflow-db-migrate'],env=env,success=False,timeout=90)
             check(missing.returncode!=0,'missing bootstrap login fails safely')
             sql("REVOKE CREATE ON SCHEMA public FROM PUBLIC; CREATE ROLE workflow_app LOGIN PASSWORD 'disposable-workflow-app'; CREATE ROLE customers_app LOGIN PASSWORD 'disposable-other'; CREATE SCHEMA customers_schema; CREATE TABLE customers_schema.private(id int)")
@@ -94,7 +110,7 @@ def execute(image=None):
             check(True,'real application DELETE TRUNCATE DDL cross-schema and history denial')
             tampered=folder/'tampered';shutil.copytree(ROOT/'db',tampered)
             with (tampered/'01_ddl/03_tables/V002__create_saga_instance.sql').open('a') as changed:changed.write('\n-- changed checksum\n')
-            failure=run(['docker','run','--rm','--network',network,'-v',str(tampered)+':/flyway/workflow:ro','-e','FLYWAY_URL='+env['FLYWAY_URL'],'-e','FLYWAY_USER=postgres','-e','FLYWAY_PASSWORD=disposable-admin','flyway/flyway:11.20.3-alpine','-workingDirectory=/flyway/workflow','-configFiles=flyway.toml','validate'],success=False,timeout=90)
+            failure=run(['docker','run','--rm','--label','synkro.execution='+identity,'--label','synkro.disposable=true','--network',network,'-v',str(tampered)+':/flyway/workflow:ro','-e','FLYWAY_URL='+env['FLYWAY_URL'],'-e','FLYWAY_USER=postgres','-e','FLYWAY_PASSWORD=disposable-admin','flyway/flyway:11.20.3-alpine','-workingDirectory=/flyway/workflow','-configFiles=flyway.toml','validate'],success=False,timeout=90)
             check(failure.returncode!=0,'real owning Flyway checksum protection')
             scripts=sorted((ROOT/'db/05_rollbacks').rglob('U*.sql'),key=lambda p:p.name,reverse=True)
             for script in scripts:
@@ -113,6 +129,20 @@ def execute(image=None):
             wait(lambda:request('/health',auth=False)['status']==200,90)
             location=start('normal');wait(lambda:completed(location,'COMPLETED'))
             check(fixture('/state')['counts']==dict(reserve=1,sale=1,release=0),'controlled complete register-sale against real store/process')
+            # Two independent JVMs race the same unique key and store ownership.
+            metadata=json.loads(run(['docker','inspect',app]).stdout)[0]
+            peer_args=['--network-alias','workflow-peer','-v',str(folder/'public.pem')+':/run/public.pem:ro','-v',str(folder/'password')+':/run/password:ro']
+            for value in metadata['Config']['Env']:peer_args+=['-e',value]
+            peer=container('workflow-peer',image,peer_args)
+            wait(lambda:request('/health',auth=False,host='workflow-peer')['status']==200,90)
+            fixture('/mode',dict(mode='normal'));race_key='concurrent-'+str(uuid.uuid4())
+            payload=dict(customerId=customer,lines=[dict(productId=product,quantity=2)])
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                responses=list(pool.map(lambda i:request('/api/v1/sagas/register-sale','POST',payload,race_key,host='workflow' if i%2 else 'workflow-peer'),range(8)))
+            check(sum(r['status']==201 for r in responses)==1 and sum(r['status']==200 for r in responses)==7 and len({r['body']['sagaId'] for r in responses})==1,'two real JVMs converge concurrent POST on one stored resource')
+            location='/api/v1/sagas/'+responses[0]['body']['sagaId'];wait(lambda:completed(location,'COMPLETED'))
+            check(fixture('/state')['counts']==dict(reserve=1,sale=1,release=0),'concurrent real executors invoke each effect once')
+            run(['docker','rm','-fv',peer]);containers.remove(peer)
             location=start('sale-reject');wait(lambda:completed(location,'COMPENSATED'))
             check(fixture('/state')['counts']==dict(reserve=1,sale=0,release=1),'controlled confirmed failure compensates exactly once')
             location=start('sale-lost');wait(lambda:completed(location,'COMPLETED'))
