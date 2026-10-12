@@ -9,6 +9,7 @@ This file is a proposal for the documentation owners; synkro-docs was not modifi
 3. Register Workflow's two-integer advisory key namespace separately from Auth's documented bigint lock. Review conservative collision serialization and the dedicated-connection recovery policy.
 4. Record bounded durable attempts and operational suspension of ambiguous outcomes. RUNNING/OUTCOME_UNRESOLVED is private diagnostic state, not a new status; no unsafe compensation or automatic FAILED repair. Approve an operational procedure only after participant evidence exists.
 5. Publish the owning runner/application credential boundary, workflow_schema grants and restricted NOLOGIN roles under current shared-instance ADR-012 topology. No workflow-db instance.
+6. Record the WKF-09/WKF-13 protocol correction: only an operation-allowed status plus its valid shared Error envelope confirms rejection. Validate JSON media type, a single unambiguous object, status/error correspondence, original traceId and optional ErrorDetail shapes. Invalid rejection envelopes never authorize compensation. Restrict retries to permitted HTTP transient states, request timeout and transport I/O; classify protocol/response-limit and local configuration/serialization/programming failures without retries. LOCAL_FAILURE is private port behavior, not a new public or database status.
 
 ## Requirement → HU → test → code
 
@@ -20,6 +21,8 @@ This file is a proposal for the documentation owners; synkro-docs was not modifi
 | Customer → reservation → sale, frozen prices | WKF-03 | core normal; HttpSaleParticipantsTest; controlled/hybrid scripts | RegisterSale; HttpSaleParticipants |
 | Lost response and interruption | WKF-03 | core lost response/write failures; process kill after reserve/sale/release commit | pending intent, stable key and startup scanner |
 | Compensation intent and failed compensation | WKF-03 | core confirmed rejection/exhaustion; interrupted release process | RegisterSale compensation branch |
+| WKF-09 valid rejection evidence; ambiguous Sales retains stock | WKF-03 | HttpSaleParticipantsTest malformed/contradictory envelopes; process committed sale + invalid 422 and restart | HttpSaleParticipants.validateRejection; RegisterSale unresolved branch |
+| WKF-13 precise retry classification and safe local failures | WKF-03 | HttpSaleParticipantsTest local serialization/configuration, TLS/protocol, oversized response, bounded transport attempts | request preparation; asynchronousFailure; ParticipantFailure.Kind |
 | RS256, required claims, roles, safe errors | WKF-03 | WorkflowHttpTest real signed JWTs and UTF-8 envelopes | SecurityConfiguration; HttpErrors; ErrorAdvice |
 | HTTP deadline with durable continuation | WKF-03 | WorkflowHttpTest and process startup recovery | SagaController; BackgroundExecution |
 | Store-only public health | WKF-03 | HTTP health; real PostgreSQL stop/start | StoreHealth; JdbcSagaStore.healthy |
@@ -29,3 +32,5 @@ This file is a proposal for the documentation owners; synkro-docs was not modifi
 | Fully real acceptance | WKF-03 + INF-02 | actual Customers GET readiness probe | BLOCKED until Customers implementation and real rerun |
 
 Review does not close either HU. Fully real acceptance, owner review and documentation publication remain separate requirements. The Workflow feature revision is a candidate, never a permanent-branch promotion.
+
+Continuation starts at efe06565f93e6e56b7010dfd9bf5451f14a03d26. The two internal protocol gaps are resolved by 6f947778bfd795b163ef34cf7f900c12ed3aa864 after the committed/executed red regressions in 0f4e005. Maven has 43 passing tests and global LINE coverage 91.21%; the new controlled real-process case preserves the reservation and recoverable RUNNING after the committed Sales invalid rejection and restart. Infrastructure must not label this candidate as an approved delivery or change its lock in this continuation. WKF-16 remains BLOCKED by the previously verified actual Customers 501; its fully real acceptance was not repeated.
