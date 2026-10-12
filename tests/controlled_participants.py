@@ -12,6 +12,12 @@ lock=threading.Lock()
 state={'mode':'normal','reservations':{},'sales':{},'counts':{'reserve':0,'sale':0,'release':0},'paused':False}
 now='2026-10-12T12:00:00Z'
 
+def response_body(response):
+    data=response.read()
+    if not data:return {}
+    try:return json.loads(data)
+    except (ValueError,UnicodeError):return {}
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args): pass
     def reply(self,code,body):
@@ -41,8 +47,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path=='/probe':
             data=self.body();headers=data.get('headers',{});body=data.get('body');request=Request(data['url'],data=None if body is None else json.dumps(body).encode(),headers=headers,method=data.get('method','GET'))
             try:
-                with urlopen(request,timeout=10) as response:return self.reply(200,{'status':response.status,'headers':dict(response.headers),'body':json.loads(response.read())})
-            except HTTPError as error:return self.reply(200,{'status':error.code,'headers':dict(error.headers),'body':json.loads(error.read())})
+                with urlopen(request,timeout=10) as response:return self.reply(200,{'status':response.status,'headers':dict(response.headers),'body':response_body(response)})
+            except HTTPError as error:return self.reply(200,{'status':error.code,'headers':dict(error.headers),'body':response_body(error)})
         if self.headers.get('Authorization')!='Bearer '+config['service']:return self.reply(403,{'error':'FORBIDDEN'})
         key=self.headers.get('Idempotency-Key');pause=False;lost=False
         with lock:
