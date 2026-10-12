@@ -12,7 +12,7 @@ The application requires a valid RSA public key (at least 2048 bits) at startup.
 
 ## Execution limits
 
-Four workers and 64 queued IDs are defaults. Configuration allows 1–16 workers, 1–1000 queued IDs, and a 100–60000 ms scan interval. Hikari has 12 connections; JDBC acquisition is bounded to 3 seconds. Every participant connection is bounded to 2 seconds and each full response to 3 seconds with a 1 MiB maximum body. Only transient transport/429/5xx failures receive at most three persisted attempts, exponential backoff and jitter. Business rejection and authorization rejection are not retried as transient failures.
+Four workers and 64 queued IDs are defaults. Configuration allows 1–16 workers, 1–1000 queued IDs, and a 100–60000 ms scan interval. Hikari has 12 connections; JDBC acquisition is bounded to 3 seconds. Every participant connection is bounded to 2 seconds and each full response to 3 seconds with a 1 MiB maximum body. Only transient transport/408/429/500/502/503/504 failures receive at most three persisted attempts, exponential backoff and jitter. Business rejection and authorization rejection are not retried as transient failures.
 
 The HTTP response deadline defaults to 1000 ms and allows 1–10000 ms. Deadline expiry returns the stored RUNNING resource; it does not cancel execution. A full queue leaves the created row durable for the independent scanner. GET and duplicate POST do not launch competing workers. Shutdown stops scanning, drains workers for five seconds, then interrupts and waits at most three more seconds. Startup scans durable RUNNING rows immediately.
 
@@ -35,3 +35,5 @@ U scripts are a controlled rollback family outside forward discovery. Destructiv
 ## Evidence separation
 
 mvn verify, tests/check_coverage.py and tests/test_deployment.py need only this repository. tests/process_acceptance.py requires Docker and cryptography 46.0.3 and runs real PostgreSQL/Workflow processes with controlled participants. tests/hybrid_acceptance.py is local-only and requires clean immutable snapshots of the exact participant pins embedded in that script. It builds real Customers, Products and Sales plus owning Products/Sales migration runners; Customers remains 501. Controlled and hybrid evidence never constitute fully real acceptance.
+
+Confirmed rejection uses the published response codes for each owning operation: Customers lookup 404; reservation creation and Sales registration 400/422; reservation read/release 404. Authorization failures, structural 501 and undocumented statuses are not transient retries or proof of a failed sale. Unknown Sales 4xx preserves RUNNING/OUTCOME_UNRESOLVED; HTTP 408 is ambiguous and resolves through the stable idempotent operation.
