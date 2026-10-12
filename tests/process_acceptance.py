@@ -150,7 +150,8 @@ def execute(image=None):
             for mode,status in [('reserve-pause','COMPLETED'),('sale-pause','COMPLETED'),('release-pause','COMPENSATED')]:
                 location=start(mode);wait(lambda:fixture('/state')['paused'])
                 run(['docker','kill',app]);run(['docker','start',app]);wait(lambda:request('/health',auth=False)['status']==200,90)
-                wait(lambda:completed(location,status),45)
+                wait(lambda:sql("SELECT status FROM workflow_schema.saga_instance WHERE saga_id='"+location.split('/')[-1]+"'")==status,45)
+                check(request(location)['body']['status']==status,'startup resumption completes without saga polling '+mode)
                 expected=dict(reserve=1,sale=0 if status=='COMPENSATED' else 1,release=1 if status=='COMPENSATED' else 0)
                 check(fixture('/state')['counts']==expected,'real JVM interruption after external commit '+mode)
             # Disposable fault injection rejects exactly the local reservation-result
@@ -167,6 +168,8 @@ def execute(image=None):
             run(['docker','stop',database]);check(request('/health',auth=False)['status']==503,'actual store outage returns 503')
             run(['docker','start',database]);wait(lambda:request('/health',auth=False)['status']==200,60)
             check(request(location)['body']['status']=='RUNNING','durable state survives PostgreSQL stop/start')
+            started=time.monotonic();run(['docker','stop','--time','12',app],timeout=20)
+            check(time.monotonic()-started<15,'bounded graceful Workflow shutdown')
             print('BLOCKED fully real acceptance: these participant fixtures are controlled',flush=True)
         finally:
             for name in reversed(containers):
