@@ -21,10 +21,20 @@ shared instance is permitted. No payment, broker, outbox or sale deletion.
    commit over a successor. Stable participant idempotency keys protect external
    effects after a database connection fails while an HTTP request is in flight.
 
-Choose option 2. Do not hold a row lock over backoff or the whole saga. Executor
-ownership is a single slice, not a JVM flag. An in-memory deduplication set is
-only a capacity optimization. A transaction that fails to save/commit never
-authorizes the next forward step. SELECT/UPDATE permissions suffice.
+3. A PostgreSQL session advisory lock keeps exclusive ownership across separate
+   intent/result commits without schema changes. Use the two-integer overload,
+   derived from the UUID, which has a separate key space from Auth's reserved
+   single-bigint key. Hash collisions only serialize unrelated sagas. One
+   dedicated connection owns the lock and all writes; never reconnect a lease.
+
+Choose option 3 after refining the ambiguous-effect boundary. Row locks release
+at commit, so they cannot safely bridge a committed intent and the next call
+without a second protocol. Session ownership survives commits but disappears
+on connection/process failure. Bounded HTTP/connect/socket/idle-session limits
+prevent abandoned sessions persisting indefinitely. A stale connection cannot
+save after lock loss; idempotent participant operations protect stale external
+requests. An in-memory deduplication set only optimizes capacity. SELECT/UPDATE
+permissions suffice. Reserve the two-integer key derivation in the docs handoff.
 
 ## Boundaries and recovery
 
@@ -72,16 +82,24 @@ completed steps. Participant idempotency is required even under row locking.
 
 ## Review dependencies
 
-Published contracts do not decide cross-caller/conflicting-input key replay or
-per-person visibility of saga GET. Do not expose another caller's stored resource.
-Proposed replay policy: existing 403 FORBIDDEN for another caller, existing 400
-VALIDATION_ERROR for conflicting input; owning team/docs review required before
-adoption. No new status code is proposed. GET visibility requires review too.
+User-approved clarification, 2026-10-12: authenticate and authorize before POST
+replay resolution; 403 FORBIDDEN for another caller and 400 VALIDATION_ERROR for
+conflicting validated input. Generic errors expose no input/owner/saga identifier;
+rejected replays perform no writes or participant calls. Equivalent input is
+customer UUID plus lines sorted by product UUID with positive integer quantity;
+JSON property order and line order do not change identity. Reject repeated product
+lines, consistent with the owning reservation contract. Same caller/equivalent
+input receives the existing saga, 200, without effects. No 409. GET authorization
+remains the published ADMIN/SALESPERSON access, unchanged by this clarification.
 
-Original correlation ID, unresolved-effect markers and durable compensation
-attempt counts require private JSON metadata conventions. Proposed namespace:
-step_results.execution (correlationId, pendingStep, ambiguous, attempts).
-This changes no schema/public fields, but must be reviewed and handed off to docs.
+User approved private recovery metadata, 2026-10-12. Namespace:
+step_results.execution (correlationId, pendingStep, attempts).
+Persist pendingStep before each mutating call; a preexisting pendingStep means
+the prior effect is ambiguous. A definitive rejection from a fresh attempt can
+compensate; a rejection after a preexisting pendingStep cannot. Attempts persist
+before the call so process death cannot reset the retry budget. After exhaustion,
+forward ambiguity stays RUNNING with OUTCOME_UNRESOLVED; automatic loops do not
+reset its budget. This changes no schema/public fields and goes to docs review.
 Do not change published input semantics or add schema columns to hide this gap.
 
 ## Verification boundaries
