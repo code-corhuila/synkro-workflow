@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.*;
 
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(WorkflowHttpTest.Fixtures.class)
+@org.springframework.test.context.ActiveProfiles("test")
 class WorkflowHttpTest {
     static final KeyPair keys=keys();
     static final UUID caller=UUID.randomUUID(),customer=UUID.randomUUID(),product=UUID.randomUUID();
@@ -40,6 +41,13 @@ class WorkflowHttpTest {
         }catch(Exception e){throw new AssertionError(e);}
     }
     String jwt(String role){return token(role,System.currentTimeMillis()/1000+600,keys,"RS256");}
+    String withoutClaim(String field) throws Exception {
+        String[] pieces=jwt("ADMIN").split("\\.");var mapper=new com.fasterxml.jackson.databind.ObjectMapper();
+        var payload=(com.fasterxml.jackson.databind.node.ObjectNode)mapper.readTree(Base64.getUrlDecoder().decode(pieces[1]));payload.remove(field);
+        String value=pieces[0]+"."+Base64.getUrlEncoder().withoutPadding().encodeToString(mapper.writeValueAsBytes(payload));
+        Signature signature=Signature.getInstance("SHA256withRSA");signature.initSign(keys.getPrivate());signature.update(value.getBytes(StandardCharsets.UTF_8));
+        return value+"."+Base64.getUrlEncoder().withoutPadding().encodeToString(signature.sign());
+    }
     ResponseEntity<String> request(String path,HttpMethod method,String token,String key,String body){
         var h=new HttpHeaders();h.setContentType(MediaType.APPLICATION_JSON);h.set("X-Correlation-Id","http-trace");
         if(token!=null)h.setBearerAuth(token);if(key!=null)h.set("Idempotency-Key",key);
@@ -65,6 +73,11 @@ class WorkflowHttpTest {
         for(String role:List.of("INVENTORY","SERVICE")) {
             assertThat(request("/api/v1/sagas/register-sale",HttpMethod.POST,jwt(role),"role-key-123",input()).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
             assertThat(request("/api/v1/sagas/"+UUID.randomUUID(),HttpMethod.GET,jwt(role),null,null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        }
+    }
+    @Test void allRequiredClaimsAreEnforced() throws Exception {
+        for(String field:List.of("sub","roles","permissions","iat","exp","jti")) {
+            assertThat(request("/api/v1/sagas/"+UUID.randomUUID(),HttpMethod.GET,withoutClaim(field),null,null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         }
     }
     @Test void creationReplayAndPublicProjection() throws Exception {
@@ -103,7 +116,7 @@ class WorkflowHttpTest {
     }
     @TestConfiguration static class Fixtures {
         @Bean Memory store(){return memory;}
-        @Bean SaleParticipants participants(){return new SaleParticipants(){
+        @Bean @Primary SaleParticipants testParticipants(){return new SaleParticipants(){
             public void validateCustomer(UUID id,String key,String trace){try{Thread.sleep(100);}catch(InterruptedException e){Thread.currentThread().interrupt();}}
             public Reservation reserve(SaleInput input,String key,String trace){effects.incrementAndGet();return new Reservation(UUID.randomUUID(),List.of(new Reservation.Line(product,2,125)));}
             public UUID register(Saga saga,String key,String trace){return UUID.randomUUID();}
