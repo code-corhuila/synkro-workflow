@@ -53,6 +53,26 @@ class RegisterSaleTest {
         assertThatThrownBy(() -> new SaleInput(customer, Collections.nCopies(2, input.lines().getFirst()))).isInstanceOf(WorkflowError.class);
         assertThatThrownBy(() -> usecase.start(input, caller, "short", "trace")).isInstanceOf(WorkflowError.class);
     }
+    @Test void concurrentConflictingReplaysPreserveTheResourceAndNeverInvokeParticipants() throws Exception {
+        Saga first=start(); UUID other=UUID.randomUUID();
+        SaleInput conflict=new SaleInput(customer,List.of(new SaleInput.Line(product,3)));
+        try(var pool=Executors.newFixedThreadPool(8)) {
+            var gate=new CyclicBarrier(8);var tasks=new ArrayList<Future<String>>();
+            for(int i=0;i<8;i++) {
+                boolean differentCaller=i%2==0;
+                tasks.add(pool.submit(()->{
+                    gate.await();
+                    try {usecase.start(differentCaller?input:conflict,differentCaller?other:caller,"key-12345","new-correlation");return "unexpected success";}
+                    catch(WorkflowError error){return error.getMessage();}
+                }));
+            }
+            var errors=new ArrayList<String>();for(var task:tasks)errors.add(task.get(5,TimeUnit.SECONDS));
+            assertThat(errors).containsOnly("FORBIDDEN","VALIDATION_ERROR");
+            assertThat(errors.stream().filter("FORBIDDEN"::equals).count()).isEqualTo(4);
+        }
+        assertThat(store.rows).hasSize(1);assertThat(store.find(first.id())).contains(first);
+        assertThat(participants.keys).isEmpty();
+    }
     @Test void rejectionBeforeReservationHasNoEffects() {
         participants.reject = "validate-customer";
         Saga saga = start(); usecase.execute(saga.id());
