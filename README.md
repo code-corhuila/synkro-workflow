@@ -25,7 +25,7 @@ python tests/process_acceptance.py
 
 The owner CI needs no private sibling checkout. The process suite uses disposable real PostgreSQL and the actual Workflow JVM with controlled HTTP participants, including interruption after effects commit and failed local result writes. It removes its owned resources.
 
-For local hybrid evidence, use clean immutable participant snapshots and run python tests/hybrid_acceptance.py --workspace /path/to/snapshots. Exact pins are checked before execution. Current Customers GET remains 501; controlled Customers with real Products/Sales is hybrid evidence. Fully real acceptance and HU closure remain blocked until the owner supplies that operation and the complete scenario is rerun.
+For local hybrid evidence, use clean immutable participant snapshots and run python tests/hybrid_acceptance.py --workspace /path/to/snapshots. Exact pins are checked before execution. The historical Customers 501 on GET /api/v1/customers/{id} does not describe Customers v2.0.0, which serves that operation; tests/hybrid_acceptance.py still asserts the old 501 and is kept only as historical controlled/hybrid evidence, not as a check against current Customers. Fully real acceptance (WKF-16) must run against exact participant revisions and is recorded in the release pull request, not in this file; HU closure remains a separate documentation decision.
 
 ## Branching
 
