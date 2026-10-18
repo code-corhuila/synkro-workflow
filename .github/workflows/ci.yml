@@ -20,3 +20,25 @@ jobs:
           test -f .github/pull_request_template.md
           test -f .env.example
           echo "Common files present."
+
+  build-test-and-architecture-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+          cache: "maven"
+      - name: Build and test
+        run: mvn -B verify
+      - name: Architecture check — workflow-core has no Spring dependency
+        run: |
+          set -euo pipefail
+          mvn -q -pl workflow-core dependency:tree -DoutputFile=/tmp/workflow-core-deps.txt
+          if grep -qi 'org.springframework' /tmp/workflow-core-deps.txt; then
+            echo "workflow-core depends on Spring:"
+            cat /tmp/workflow-core-deps.txt
+            exit 1
+          fi
+          echo "Architecture check passed: workflow-core has no Spring dependency."
