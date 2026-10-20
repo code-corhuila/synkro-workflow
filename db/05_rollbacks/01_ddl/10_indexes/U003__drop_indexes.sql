@@ -1,0 +1,1 @@
+DROP INDEX workflow_schema.idx_saga_instance_running;

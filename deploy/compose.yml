@@ -1,0 +1,38 @@
+services:
+  synkro-workflow:
+    build:
+      context: ../
+      dockerfile: deploy/Dockerfile
+    environment:
+      SERVER_PORT: "8080"
+      WORKFLOW_DATABASE_URL: ${WORKFLOW_DATABASE_URL:-jdbc:postgresql://synkro-db:5432/synkro}
+      WORKFLOW_APP_PASSWORD_FILE: /run/secrets/workflow_app_password
+      JWT_PUBLIC_KEY_FILE: /run/secrets/workflow_public_key
+      SERVICE_TOKEN: ${WORKFLOW_SERVICE_TOKEN:?set Auth-issued Workflow SERVICE token}
+      WORKFLOW_EXECUTORS: ${WORKFLOW_EXECUTORS:-4}
+      WORKFLOW_QUEUE: ${WORKFLOW_QUEUE:-64}
+      WORKFLOW_RESPONSE_TIMEOUT_MS: ${WORKFLOW_RESPONSE_TIMEOUT_MS:-1000}
+    secrets: [workflow_app_password, workflow_public_key]
+    expose: ["8080"]
+    networks: [platform]
+  workflow-db-migrate:
+    image: flyway/flyway:11.20.3-alpine
+    profiles: [tooling]
+    environment:
+      FLYWAY_URL: ${FLYWAY_URL:?set administrator runner JDBC URL with bounded connect/socket timeouts}
+      FLYWAY_USER: ${FLYWAY_USER:?set runner administrator user}
+      FLYWAY_PASSWORD: ${FLYWAY_PASSWORD:?set runner administrator password}
+    volumes:
+      - ../db:/flyway/workflow:ro
+    entrypoint: ["flyway", "-workingDirectory=/flyway/workflow", "-configFiles=flyway.toml"]
+    command: ["migrate"]
+    networks: [platform]
+secrets:
+  workflow_app_password:
+    file: ${WORKFLOW_APP_PASSWORD_PATH:?set protected Workflow application password path}
+  workflow_public_key:
+    file: ${JWT_PUBLIC_KEY_PATH:?set Auth public key path}
+networks:
+  platform:
+    external: true
+    name: ${PLATFORM_NETWORK:-platform}

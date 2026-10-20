@@ -1,0 +1,12 @@
+[environments.default]
+schemas = ["workflow_schema"]
+connectRetries = 5
+connectRetriesInterval = 1
+[flyway]
+defaultSchema = "workflow_schema"
+locations = ["filesystem:01_ddl", "filesystem:03_dcl"]
+validateMigrationNaming = true
+cleanDisabled = true
+failOnMissingLocations = true
+[flyway.postgresql.transactional]
+lock = false
