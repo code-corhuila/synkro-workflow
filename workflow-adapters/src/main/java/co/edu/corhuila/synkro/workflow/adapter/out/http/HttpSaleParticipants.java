@@ -91,7 +91,7 @@ public final class HttpSaleParticipants implements SaleParticipants {
             HttpResponse<byte[]> response=pending.get(timeout.toMillis(),TimeUnit.MILLISECONDS);
             int code=response.statusCode();
             if(code==401||code==403)throw new ParticipantFailure(ParticipantFailure.Kind.AUTHORIZATION);
-            if(Set.of(408,429,500,502,503,504).contains(code))throw new ParticipantFailure(ParticipantFailure.Kind.TRANSIENT);
+            if(Set.of(429,500,502,503,504).contains(code))throw new ParticipantFailure(ParticipantFailure.Kind.TRANSIENT);
             if(confirmedRejections.contains(code)) {
                 validateRejection(response,code,trace);
                 throw new ParticipantFailure(ParticipantFailure.Kind.REJECTED);
@@ -133,16 +133,31 @@ public final class HttpSaleParticipants implements SaleParticipants {
         });
     }
     private static ParticipantFailure asynchronousFailure(Throwable failure) {
-        while((failure instanceof CompletionException || failure instanceof ExecutionException) && failure.getCause()!=null)failure=failure.getCause();
-        // Contract/configuration failures can be nested inside a transport wrapper.
+        var chain=new ArrayList<Throwable>();
         var visited=Collections.newSetFromMap(new IdentityHashMap<Throwable,Boolean>());
-        for(Throwable cause=failure;cause!=null && visited.add(cause);cause=cause.getCause()) {
+        for(Throwable cause=failure;cause!=null && visited.add(cause);cause=cause.getCause())chain.add(cause);
+
+        // A wrapper never converts a contract/configuration failure into an outage.
+        for(Throwable cause:chain) {
             if(cause instanceof ResponseLimitExceeded || cause instanceof java.net.ProtocolException)
                 return new ParticipantFailure(ParticipantFailure.Kind.INVALID_RESPONSE);
-            if(cause instanceof javax.net.ssl.SSLException || cause instanceof java.net.UnknownHostException || cause instanceof java.nio.channels.UnresolvedAddressException)
-                return new ParticipantFailure(ParticipantFailure.Kind.LOCAL_FAILURE);
         }
-        return new ParticipantFailure(failure instanceof IOException?ParticipantFailure.Kind.TRANSIENT:ParticipantFailure.Kind.LOCAL_FAILURE);
+        boolean transport=false;
+        for(Throwable cause:chain) {
+            if(cause instanceof javax.net.ssl.SSLException || cause instanceof java.net.UnknownHostException
+                || cause instanceof java.nio.channels.UnresolvedAddressException || cause instanceof java.net.BindException
+                || cause instanceof java.net.NoRouteToHostException || cause instanceof java.net.PortUnreachableException)
+                return new ParticipantFailure(ParticipantFailure.Kind.LOCAL_FAILURE);
+            if(cause instanceof CompletionException || cause instanceof ExecutionException || cause.getClass()==IOException.class)continue;
+            if(cause instanceof java.io.EOFException || cause instanceof HttpTimeoutException
+                || cause instanceof java.net.SocketTimeoutException || cause instanceof java.net.SocketException
+                || cause instanceof java.nio.channels.ClosedChannelException) {
+                transport=true;
+            } else {
+                return new ParticipantFailure(ParticipantFailure.Kind.LOCAL_FAILURE);
+            }
+        }
+        return new ParticipantFailure(transport?ParticipantFailure.Kind.TRANSIENT:ParticipantFailure.Kind.LOCAL_FAILURE);
     }
     private static final class ResponseLimitExceeded extends RuntimeException {}
     private static final class LimitedBody implements HttpResponse.BodySubscriber<byte[]> {
