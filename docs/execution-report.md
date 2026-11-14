@@ -1,5 +1,56 @@
 # Workflow execution evidence
 
+## HU-WKF-04 QA promotion — current status
+
+Source promotion of the corrective delivery below; no new behavior. This subsection records status only and does not replace the evidence that follows.
+
+- Source: corrective PR18 merged into develop on 2026-11-14 (23:39:04 UTC) as [59e3107](https://github.com/code-corhuila/synkro-workflow/commit/59e3107ceff9c76bf2bacb993db556fb5a0e157f); feature head [e2fe763](https://github.com/code-corhuila/synkro-workflow/commit/e2fe763fde2ccd55d00c8dc4b7b6e46165f9aca8), merge tree equal to feature tree. The API review list was empty: this is the owner's merge with no independent review observed, and approval is not inferred.
+- Original PR17 closed without merge; its confirmed TDD deviation and the attribution below are unchanged and not cured by this promotion.
+- Baselines: QA `569a9cb1194e0b76c94c9993f5fe32fc7899f7b8`, main `09a193866f05f3714a0bd1ad6d7559a9f00b3611`; their trees match each other and the former develop baseline `2aa2f25`, with different histories.
+- Child `qa-workflow-resilience` (`qa-<description>` naming, since `refs/heads/qa` blocks `qa/<child>`) was cut from `origin/qa`. Seven `cherry-pick -x` applications had no conflicts; before the documentation edits its file tree equals develop `59e3107`.
+
+| Develop source | QA reapplied |
+|---|---|
+| [3b6f50a](https://github.com/code-corhuila/synkro-workflow/commit/3b6f50a99dc87f1bdc98646555fa6e2db5ec23db) | [2af9436](https://github.com/code-corhuila/synkro-workflow/commit/2af943609e97c17cf220fc2a9bd6f70b526502c0) |
+| [4f9c4c6](https://github.com/code-corhuila/synkro-workflow/commit/4f9c4c63fc4b62dafc04c3d6c7aeb096e28ee16d) | [1fd9193](https://github.com/code-corhuila/synkro-workflow/commit/1fd9193bc302968f01fa47961de6703d1ae38e08) |
+| [d8101c2](https://github.com/code-corhuila/synkro-workflow/commit/d8101c273c2ded4826e93d1b6cf7510ffb57faff) | [da2c01c](https://github.com/code-corhuila/synkro-workflow/commit/da2c01c9e10dde392125ed589c56ffcaf46f38d6) |
+| [26586b3](https://github.com/code-corhuila/synkro-workflow/commit/26586b3dbcb57565a9e00a8d4fc22e2cf24613fe) | [f0de210](https://github.com/code-corhuila/synkro-workflow/commit/f0de2103b8b2224629d63f1672ab69f17883ba55) |
+| [89b6a19](https://github.com/code-corhuila/synkro-workflow/commit/89b6a19f4ea22cd93d214e25c5d77a01e36f26b5) | [0bdbb1b](https://github.com/code-corhuila/synkro-workflow/commit/0bdbb1b35e437bfa21ce49bce3277cce7f692e86) |
+| [321f85f](https://github.com/code-corhuila/synkro-workflow/commit/321f85ffa5580119636923eafcc4ce39eb556ed8) | [dcc6db0](https://github.com/code-corhuila/synkro-workflow/commit/dcc6db04cd4b1a861e077ff6ab11bfa2a0903798) |
+| [e2fe763](https://github.com/code-corhuila/synkro-workflow/commit/e2fe763fde2ccd55d00c8dc4b7b6e46165f9aca8) | [39fcf1c](https://github.com/code-corhuila/synkro-workflow/commit/39fcf1cf1842a42ac6a92077fe6ee5250d76615c) |
+
+| Item | Status |
+|---|---|
+| Fresh QA tests on the child |121 Java tests,4 Python guards,93.92% global LINE;44 controlled and21 actual-service checks passed |
+| QA child publication and merge | Pending (owner merges) |
+| Main proposal (`release/<description>` from `origin/main`) | Pending; needs actual `ariel5253` approval on the delivered head plus codeowner/conversation gates |
+| Lock-algorithm rollout / scenario 3 | Unexecuted; source promotion is not a deployment |
+
+### Fresh QA execution record
+
+Fresh QA executions on the child passed: **121 Java tests** (core16/adapters93/app12), zero failures/errors/skips; LINE global93.92%, domain100%, application98.25%, infrastructure92.75%; four Python guards and core architecture/protected-file checks. Separate controlled real Workflow/PostgreSQL acceptance **44/44** and actual Customers/Products/Sales acceptance **21/21** passed, with exact clean snapshots and two owned disposable cleanups. These are fresh QA-candidate executions; no QA merge, persistent deployment or new global21-suite acceptance is inferred.
+
+Verified source head before the promotion-only documentation commit: `39fcf1cf1842a42ac6a92077fe6ee5250d76615c`. Runtime/test/config inputs remained unchanged during each execution, match the merged develop tree and match the final candidate after documentation-only edits. Seven provenance footers were checked against actual develop ancestors. Publication/head status belongs to the associated PR and HU; no self-referential SHA is invented.
+
+| Actual participant snapshot | Commit |
+|---|---|
+| synkro-customers-api | `8f39ac8f105772a60ba8c4cc6cd90e101f44db6e` |
+| synkro-customers-db | `a5aebc5dfb2408ce3a2550f604d135bceacf4207` |
+| synkro-products-api | `af06bb056fedb7b9f83d518436c3370a0f1373d1` |
+| synkro-products-db | `0beae79920d9af83865bdebaf6b316a2b2a57592` |
+| synkro-sales-api | `6ef40cfa8761231cfba80c2183d2fb0b1a06e895` |
+| synkro-sales-db | `e2168fb52f693892b8bbec4c60597b330abeb845` |
+
+| Execution | Log SHA-256 |
+|---|---|
+| `qa-reactor` | `e0b34921dae07a9242732e5e9cab46a015c0934b9554d2f0c501b6ebb273ed9a` |
+| `process-qa` | `539f29483d0f85eb5effecfdddc0bbf1703505f3f21b750e6e6a75fbaf5fb526` |
+| `real-qa` | `c1cd4370286b4f3e7790f93184a07ea799abd6c1e4cda516500debee429a0df5` |
+
+Claude Code changed only this report, the prepared PR description and the existing documentation handoff; Codex reviewed those diffs, executed fresh verification and recorded the outcomes. No production/test/CI/Accepted-ADR change was introduced by the promotion record. Original test-first chronology remains attributed to the corrective implementation, not replayed as new TDD.
+
+Pact: Tier 3b of the testing strategy requires no new or regenerated Pact when no HTTP call is added or altered. The diff `569a9cb..39fcf1c` leaves request construction in `HttpSaleParticipants.java` unchanged and only reclassifies responses/failures; attempts may be fewer. No Pact was run or waived. The runs below are controlled-fixture and real-service acceptance, not Pact.
+
 ## HU-WKF-04 corrective delivery — 2026-11-14
 
 The owner chose a new corrective delivery with verifiable TDD after the original session audit confirmed code-before-test work in PR17. This branch, `feat/workflow-tdd-remediation`, starts at develop `2aa2f25f4411f0c2bbdbf7cbfb57701fcee7c7d7`. Original PR17/head `a84b2da25b3d51ae2ef289e2f260e18538a59f7b` is preserved; it is not an ancestor of this delivery. The [original deviation and owner decision](https://github.com/code-corhuila/synkro-docs/issues/316) remain recorded. No exception or retrospective TDD compliance is claimed.
