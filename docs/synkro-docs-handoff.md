@@ -1,3 +1,19 @@
+# Workflow documentation handoff
+
+## HU-WKF-04 corrective delivery — current handoff
+
+Trace: FR-005/007; NFR-002/004/005/006/009 → [HU-WKF-04/#316](https://github.com/code-corhuila/synkro-docs/issues/316) → the concrete test-to-code map in [tdd-remediation-design.md](tdd-remediation-design.md) → the observed evidence in [execution-report.md](execution-report.md). The new test-first contract and implementation commits are separate from original PR17; its confirmed process deviation remains recorded.
+
+Reuse [DOCS-98/#266](https://github.com/code-corhuila/synkro-docs/issues/266); create no new synkro-docs files. Reconcile the existing `06-data/models.md` advisory-key section, `05-architecture/pattern-guide.md`, `05-architecture/cross-cutting.md`, `11-quality/testing-strategy.md`, `15-project-control/technical-backlog.md`, `04-requirements/traceability-matrix.md` and `15-project-control/documentation-verification.md`. Keep Accepted ADR-015 unchanged. Record the actual corrective PR/head and actual integration status, not a planned promotion or an old review.
+
+Current delivered behavior: WFLK namespace/XOR keys; transient transport allow-list and 429/500/502/503/504; full jitter; per-participant circuits with shared Products reserve/release. Refusal consumes one pre-persisted local attempt and retains unresolved forward reservations; refused compensation remains FAILED. Call/connect limits remain3s/2s. Do not present that conservative refusal policy as a new approved ADR or a supported recovery operation.
+
+Executed:121 Maven tests, four Python guards,93.92% global LINE,44 controlled-process checks and21 actual-participant checks with the six immutable revisions listed in the execution report. The original43-check corrected process run is retained; the strengthened44-check run adds the real SQL attempt-count assertion. These are separate scopes, not a global21-suite run. Scenario3/fleet switch and persistent deployment remain unexecuted. TD-014/015/016 stay open until their own remaining gates are evidenced. TD-012 remains open and excluded; FR-006/NFR-009 completeness is not inferred.
+
+---
+
+## Historical HU-WKF-03 handoff (prior baseline; current claims above supersede stale implementation/Customers-readiness statements)
+
 # Prepared documentation handoff — HU-WKF-03 / HU-INF-02
 
 This file is a proposal for the documentation owners; synkro-docs was not modified. Source baseline: 61056c93e6e0783a9199bf56778e9494739bc458. HU-WKF-03 is published as open issue #243; HU-INF-02 remains open #239. Responsible: Ángel (AsolanoT).
