@@ -3,6 +3,8 @@ import co.edu.corhuila.synkro.workflow.application.port.out.*;
 import co.edu.corhuila.synkro.workflow.application.usecase.RegisterSale;
 import co.edu.corhuila.synkro.workflow.domain.model.WorkflowError;
 import co.edu.corhuila.synkro.workflow.adapter.out.persistence.JdbcSagaStore;
+import co.edu.corhuila.synkro.workflow.adapter.out.http.CircuitBreakingParticipants;
+import co.edu.corhuila.synkro.workflow.adapter.out.http.FullJitterDelay;
 import co.edu.corhuila.synkro.workflow.adapter.out.http.HttpSaleParticipants;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zaxxer.hikari.*;
@@ -26,20 +28,16 @@ public class WorkflowComposition {
         return new HikariDataSource(config);
     }
     @Bean @Profile("!test") @ConditionalOnMissingBean(SagaStore.class) JdbcSagaStore sagaStore(DataSource ds,ObjectMapper json){return new JdbcSagaStore(ds,json);}
-    @Bean @ConditionalOnMissingBean(SaleParticipants.class) SaleParticipants participants(ObjectMapper json,
+    @Bean @ConditionalOnMissingBean(SaleParticipants.class) SaleParticipants participants(ObjectMapper json,Clock clock,
         @Value("${CUSTOMERS_BASE_URL:http://synkro-customers-api:8080}") String customers,
         @Value("${PRODUCTS_BASE_URL:http://synkro-products-api:8080}") String products,
         @Value("${SALES_BASE_URL:http://synkro-sales-api:8080}") String sales,
         @Value("${SERVICE_TOKEN_FILE:}") String file,@Value("${SERVICE_TOKEN:}") String token){
         var client=HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(2)).followRedirects(HttpClient.Redirect.NEVER).build();
-        return new HttpSaleParticipants(client,json,URI.create(customers),URI.create(products),URI.create(sales),()->file.isBlank()?token:secret(file),Duration.ofSeconds(3));
+        return new CircuitBreakingParticipants(new HttpSaleParticipants(client,json,URI.create(customers),URI.create(products),URI.create(sales),()->file.isBlank()?token:secret(file),Duration.ofSeconds(3)),clock);
     }
     @Bean RegisterSale usecase(SagaStore store,ExecutionCoordinator coordination,SaleParticipants participants,Clock clock){
-        return new RegisterSale(store,coordination,participants,clock,UUID::randomUUID,attempt->{
-            long bound=Math.min(2000,100L<<(attempt-1));
-            try{Thread.sleep(bound+ThreadLocalRandom.current().nextLong(bound/2+1));}
-            catch(InterruptedException e){Thread.currentThread().interrupt();throw new WorkflowError("INTERNAL_ERROR");}
-        },3);
+        return new RegisterSale(store,coordination,participants,clock,UUID::randomUUID,FullJitterDelay.system(),3);
     }
     @Bean BackgroundExecution background(SagaStore store,RegisterSale usecase,@Value("${WORKFLOW_EXECUTORS:4}") int capacity,@Value("${WORKFLOW_QUEUE:64}") int queue,@Value("${WORKFLOW_SCAN_INTERVAL_MS:1000}") long interval){
         return new BackgroundExecution(store,usecase,capacity,queue,interval);

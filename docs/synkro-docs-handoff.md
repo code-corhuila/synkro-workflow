@@ -1,5 +1,7 @@
 # Prepared documentation handoff — HU-WKF-03 / HU-INF-02
 
+> The earlier HU-WKF-03 handoff is historical. The current HU-WKF-04 update for DOCS-98 is recorded below and in `execution-report.md`.
+
 This file is a proposal for the documentation owners; synkro-docs was not modified. Source baseline: 61056c93e6e0783a9199bf56778e9494739bc458. HU-WKF-03 is published as open issue #243; HU-INF-02 remains open #239. Responsible: Ángel (AsolanoT).
 
 ## Decisions requiring published review
@@ -31,6 +33,27 @@ This file is a proposal for the documentation owners; synkro-docs was not modifi
 | Immutable candidate integration and six pins | INF-02 | root test_workflow_integration; local verifier | dependencies.lock.json; verify_local.py |
 | Fully real acceptance | WKF-03 + INF-02 | actual Customers GET readiness probe | BLOCKED until Customers implementation and real rerun |
 
-Review does not close either HU. Fully real acceptance, owner review and documentation publication remain separate requirements. The Workflow feature revision is a candidate, never a permanent-branch promotion.
+## HU-WKF-04 report to HU-DOCS-98 / #266 (verified local delivery)
+
+Code owner: SantiagoPlazas2005; documentation owner: JordanRG420. Only the Workflow working tree changed.
+The full commands, 88-test breakdown, coverage, 44-check controlled-process run, 21-check REAL-SERVICES run,
+six exact participant SHAs, failed attempts and TDD provenance are in `execution-report.md`.
+
+Reconcile these existing files under DOCS-98:
+
+- `00-governance/agile-conventions.md` and `04-requirements/user-stories.md`: HU-WKF-04/#316 assignment and actual local delivery; no inferred sprint, publication or closure.
+- `04-requirements/traceability-matrix.md`: FR-005/007 and NFR-002/004/005/006/009 to the named tests and implementation. FR-006/NFR-009 remain partial under independent TD-012.
+- `06-data/models.md`: WFLK first key 0x57464C4B and signed XOR second key are implemented and exercised on real PostgreSQL; fleet rollout remains unexecuted.
+- `05-architecture/pattern-guide.md` and `05-architecture/cross-cutting.md`: actual breaker/retry/full-jitter behavior and its evidence; retain the documented 3-second response/2-second connect override, rather than silently adopting the guide's 5-second design table.
+- `11-quality/testing-strategy.md`: unit, controlled HTTP, real PostgreSQL, process recovery and actual-participant evidence remain distinct; record the original authoring-TDD limitation and the observed Codex red/green corrections.
+- `15-project-control/technical-backlog.md` and `documentation-verification.md`: TD-014/015/016 locally implemented/verified but still open for their remaining review/publication/rollout gates. The older Customers 501 was a historical source result; the six listed actual snapshots now passed normal and compensation flows.
+
+Conservative fail-fast behavior is explicit: a pre-persisted local attempt is consumed; a forward CIRCUIT_OPEN suspends
+RUNNING/OUTCOME_UNRESOLVED without automatic compensation or budget replenishment. During release-stock, the existing
+non-transient path ends FAILED with stock retained. There is no new schema, recovery endpoint, distributed breaker state,
+ADR or source change in Auth/Customers/Products/Sales. The original TDD sequence is not reconstructed from later passes.
+Quiescent advisory-key rollout is planned, not executed. This is not a new global 21-suite platform acceptance.
+
+This handoff does not close either HU. Actual-participant local acceptance passed for the listed snapshots; independent review, publication and persistent rollout remain separate gates. The Workflow feature revision is a candidate, never a permanent-branch promotion.
 
 Continuation starts at efe06565f93e6e56b7010dfd9bf5451f14a03d26. The two internal protocol gaps are resolved by 6f947778bfd795b163ef34cf7f900c12ed3aa864 after the committed/executed red regressions in 0f4e005. Maven has 43 passing tests and global LINE coverage 91.21%; the new controlled real-process case preserves the reservation and recoverable RUNNING after the committed Sales invalid rejection and restart. Infrastructure must not label this candidate as an approved delivery or change its lock in this continuation. WKF-16 remains BLOCKED by the previously verified actual Customers 501; its fully real acceptance was not repeated.

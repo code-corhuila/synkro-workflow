@@ -61,8 +61,19 @@ COMPENSATED. Release is repeatable by reservation ID, including after response
 loss. Exhausted compensation ends FAILED; preserve original forward failed_step
 and safe private compensation classification. FAILED is never auto-resumed.
 
-Retries are limited to network failures, 429 and 5xx, with exponential backoff
-and jitter. Forward ambiguous outcomes remain recoverable RUNNING after a
+Retries are limited (HU-WKF-04, ADR-015) to classified transient transport I/O or
+timeouts, 429 and 500/502/503/504 (408 is not retried), with exponential full jitter
+0..min(2000, 100<<(attempt-1)) ms; random source and wait are injected, so tests do
+not sleep. Patterns: the retry classification (RetryClassification) and wait policy
+(FullJitterDelay behind the RetryDelay port) are Strategies kept in the adapter that owns
+HTTP; a Circuit Breaker per participant (CircuitBreakingParticipants decorating the
+SaleParticipants port, because failing fast belongs at the outgoing boundary, not in the
+domain) opens after three consecutive transient failures, waits 15 s and admits one probe.
+The advisory-key derivation (AdvisoryKeys) is a pure helper inside the persistence
+adapter behind the existing ExecutionCoordinator, so no new domain port was needed.
+An open circuit consumes one already-persisted local attempt, is never a rejection and
+leaves the saga RUNNING with private OUTCOME_UNRESOLVED (see deployment-and-recovery.md).
+Forward ambiguous outcomes remain recoverable RUNNING after a
 bounded attempt burst; later recovery bursts use the same keys and frozen input.
 There is no manufactured terminal success. Authorization failures are not
 transient retries. Diagnostics use fixed classifications, never exception text,

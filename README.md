@@ -9,7 +9,7 @@ Governance and documentation live in [`synkro-docs`](https://github.com/code-cor
 
 The Maven modules retain hexagonal ownership: workflow-core contains domain/use cases/ports; workflow-adapters contains HTTP/security, participant clients and PostgreSQL persistence; workflow-app composes dependencies and the bounded background lifecycle.
 
-POST /api/v1/sagas/register-sale authenticates ADMIN/SALESPERSON with local Auth RS256 verification, validates 1–100 UUID product lines and positive integer quantities, and creates a durable resource before any external effect. First creation returns 201 with Location; equivalent caller/input replay returns 200. The approved conflicting replay policy is generic 403 for another caller and 400 for different normalized input. GET /api/v1/sagas/{id} returns only the documented public projection.
+POST /api/v1/sagas/register-sale authenticates ADMIN/SALESPERSON with local Auth RS256 verification, validates 1-100 UUID product lines and positive integer quantities, and creates a durable resource before any external effect. First creation returns 201 with Location; equivalent caller/input replay returns 200. The approved conflicting replay policy is generic 403 for another caller and 400 for different normalized input. GET /api/v1/sagas/{id} returns only the documented public projection.
 
 Read [execution design](docs/persistent-register-sale-design.md), [deployment and recovery](docs/deployment-and-recovery.md), and the [prepared documentation handoff](docs/synkro-docs-handoff.md). Populate protected placeholders from .env.example. Bootstrap workflow_app through infrastructure, run the owning workflow-db-migrate tooling service against shared synkro-db, then start Workflow on internal 8080. Public /health checks the actual saga store.
 
@@ -26,6 +26,10 @@ python tests/process_acceptance.py
 The owner CI needs no private sibling checkout. The process suite uses disposable real PostgreSQL and the actual Workflow JVM with controlled HTTP participants, including interruption after effects commit and failed local result writes. It removes its owned resources.
 
 For local hybrid evidence, use clean immutable participant snapshots and run python tests/hybrid_acceptance.py --workspace /path/to/snapshots. Exact pins are checked before execution. The historical Customers 501 on GET /api/v1/customers/{id} does not describe Customers v2.0.0, which serves that operation; tests/hybrid_acceptance.py still asserts the old 501 and is kept only as historical controlled/hybrid evidence, not as a check against current Customers. Fully real acceptance (WKF-16) must run against exact participant revisions and is recorded in the release pull request, not in this file; HU closure remains a separate documentation decision.
+
+HU-WKF-04 adds tests/real_services_acceptance.py (label REAL-SERVICES; Docker, cryptography 46.0.3, six clean snapshots passed as `--pin repo=sha`, Customers runtime wiring via `--customers-env`). Its actual Customers/Products/Sales normal and compensation flows passed locally; controlled-HTTP and historical hybrid results retain their separate scopes. See [the verified local record](docs/execution-report.md#hu-wkf-04--verified-local-implementation-2026-11-14) for commands, exact sources, results and remaining review/publication/rollout gates.
+
+Resilience behavior (HU-WKF-04): Workflow advisory lock first key 0x57464C4B (rollout only through the quiescent procedure in docs/deployment-and-recovery.md); retries only for transport I/O/request timeouts classified transient, 429 and 500/502/503/504 (408 is not retried) with full jitter; one in-process circuit breaker per participant (Customers, Products, Sales; reserve/release share Products), threshold 3, cooldown 15 s, one HALF_OPEN probe. An open circuit is never a business rejection and never compensates.
 
 ## Branching
 

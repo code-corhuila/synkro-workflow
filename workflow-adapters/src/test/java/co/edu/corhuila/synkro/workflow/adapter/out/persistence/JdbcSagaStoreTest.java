@@ -58,6 +58,69 @@ class JdbcSagaStoreTest {
             try(var successor=store.tryOwn(id).orElseThrow()) {assertThat(successor.load().execution().pendingStep()).isEqualTo("reserve-stock");}
         }
     }
+    static long advisoryHolders(int first,int second) throws SQLException {
+        try(var c=admin();var s=c.prepareStatement("SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND granted AND objsubid=2 AND classid::bigint=? AND objid::bigint=?")) {
+            s.setLong(1,Integer.toUnsignedLong(first));s.setLong(2,Integer.toUnsignedLong(second));
+            try(var r=s.executeQuery()){r.next();return r.getLong(1);}
+        }
+    }
+    @Test void leaseHoldsTheWorkflowNamespaceKeyAndReleasesIt() throws Exception {
+        Saga saga=saga("namespace-"+UUID.randomUUID());store.create(saga);int second=AdvisoryKeys.second(saga.id());
+        try(var owner=store.tryOwn(saga.id()).orElseThrow()) {
+            assertThat(advisoryHolders(AdvisoryKeys.FIRST,second)).isEqualTo(1);
+            assertThat(advisoryHolders(0x52544F4B,second)).isZero(); // Auth refresh key space untouched
+            owner.save(owner.load().attempt("reserve-stock",Instant.now()));
+            assertThat(advisoryHolders(AdvisoryKeys.FIRST,second)).isEqualTo(1);
+        }
+        assertThat(advisoryHolders(AdvisoryKeys.FIRST,second)).isZero();
+    }
+    @Test void attemptMetadataLivesOnlyUnderThePrivateExecutionRecordAndSurvivesANewStoreInstance() throws Exception {
+        Saga saga=saga("attempts-"+UUID.randomUUID());store.create(saga);
+        try(var owner=store.tryOwn(saga.id()).orElseThrow()) {
+            Saga attempted=owner.load().attempt("reserve-stock",Instant.now()).attempt("reserve-stock",Instant.now());owner.save(attempted);
+        }
+        try(var c=admin();var s=c.prepareStatement("SELECT step_results->'execution'->>'attempts',step_results->'execution'->>'pendingStep',step_results::text,error_detail,failed_step,array_to_string(completed_steps,',') FROM workflow_schema.saga_instance WHERE saga_id=?")) {
+            s.setObject(1,saga.id());try(var r=s.executeQuery()) {
+                assertThat(r.next()).isTrue();
+                assertThat(r.getString(1)).isEqualTo("2");assertThat(r.getString(2)).isEqualTo("reserve-stock");
+                assertThat(r.getString(4)).isNull();assertThat(r.getString(5)).isNull();assertThat(r.getString(6)).isEmpty();
+            }
+        }
+        var ds=new PGSimpleDataSource();ds.setURL(pg.getJdbcUrl());ds.setUser("workflow_app");ds.setPassword("disposable-app");
+        var restarted=new JdbcSagaStore(ds,JsonMapper.builder().addModule(new JavaTimeModule()).build());
+        assertThat(restarted.find(saga.id()).orElseThrow().execution().attempts()).isEqualTo(2); // a restart does not reset the budget
+        assertThat(restarted.create(saga(saga.idempotencyKey())).saga().execution().attempts()).isEqualTo(2); // a replayed POST does not replenish it
+    }
+    @Test void sagasWithCollidingSecondKeysSerializeButKeepTheirOwnRows() throws Exception {
+        Saga first=saga("collide-a-"+UUID.randomUUID());
+        UUID other=new UUID(first.id().getMostSignificantBits()^0x1234L,first.id().getLeastSignificantBits()^(0x1234L<<32));
+        assertThat(AdvisoryKeys.second(other)).isEqualTo(AdvisoryKeys.second(first.id()));
+        Saga second=new Saga(other,"collide-b-"+UUID.randomUUID(),first.initiatedBy(),first.input(),first.status(),first.completedSteps(),null,null,null,null,first.execution(),first.createdAt(),first.updatedAt());
+        store.create(first);store.create(second);
+        try(var owner=store.tryOwn(first.id()).orElseThrow()) {
+            assertThat(store.tryOwn(other)).isEmpty(); // same key serializes
+            assertThat(owner.load().id()).isEqualTo(first.id()); // but identity never aliases
+            owner.save(owner.load().attempt("reserve-stock",Instant.now()));
+        }
+        assertThat(store.find(other).orElseThrow().execution().pendingStep()).isNull();
+        try(var owner=store.tryOwn(other).orElseThrow()) {assertThat(owner.load().id()).isEqualTo(other);}
+    }
+    @Test void concurrentSessionsCompetingForOneSagaYieldASingleLeaseHolder() throws Exception {
+        Saga saga=saga("compete-"+UUID.randomUUID());store.create(saga);
+        try(var pool=Executors.newFixedThreadPool(6)) {
+            var gate=new CyclicBarrier(6);var acquisitions=new CountDownLatch(6);var futures=new ArrayList<Future<Boolean>>();
+            for(int i=0;i<6;i++) futures.add(pool.submit(()->{
+                gate.await();var owned=store.tryOwn(saga.id());acquisitions.countDown();
+                if(owned.isEmpty())return false;
+                try(var lease=owned.get()){
+                    assertThat(acquisitions.await(10,TimeUnit.SECONDS)).isTrue();
+                    return true;
+                }
+            }));
+            int winners=0;for(var f:futures)if(f.get(15,TimeUnit.SECONDS))winners++;
+            assertThat(winners).isEqualTo(1);
+        }
+    }
     @Test void killedConnectionCannotOverwriteSuccessor() throws Exception {
         Saga saga=saga("fence-"+UUID.randomUUID());store.create(saga);
         var stale=store.tryOwn(saga.id()).orElseThrow();stale.load();

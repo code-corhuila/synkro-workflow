@@ -91,7 +91,7 @@ public final class HttpSaleParticipants implements SaleParticipants {
             HttpResponse<byte[]> response=pending.get(timeout.toMillis(),TimeUnit.MILLISECONDS);
             int code=response.statusCode();
             if(code==401||code==403)throw new ParticipantFailure(ParticipantFailure.Kind.AUTHORIZATION);
-            if(Set.of(408,429,500,502,503,504).contains(code))throw new ParticipantFailure(ParticipantFailure.Kind.TRANSIENT);
+            if(RetryClassification.transientStatus(code))throw new ParticipantFailure(ParticipantFailure.Kind.TRANSIENT);
             if(confirmedRejections.contains(code)) {
                 validateRejection(response,code,trace);
                 throw new ParticipantFailure(ParticipantFailure.Kind.REJECTED);
@@ -142,7 +142,7 @@ public final class HttpSaleParticipants implements SaleParticipants {
             if(cause instanceof javax.net.ssl.SSLException || cause instanceof java.net.UnknownHostException || cause instanceof java.nio.channels.UnresolvedAddressException)
                 return new ParticipantFailure(ParticipantFailure.Kind.LOCAL_FAILURE);
         }
-        return new ParticipantFailure(failure instanceof IOException?ParticipantFailure.Kind.TRANSIENT:ParticipantFailure.Kind.LOCAL_FAILURE);
+        return new ParticipantFailure(RetryClassification.transientIo(failure)?ParticipantFailure.Kind.TRANSIENT:ParticipantFailure.Kind.LOCAL_FAILURE);
     }
     private static final class ResponseLimitExceeded extends RuntimeException {}
     private static final class LimitedBody implements HttpResponse.BodySubscriber<byte[]> {

@@ -114,6 +114,43 @@ class RegisterSaleTest {
         assertThat(store.find(saga.id()).orElseThrow().errorDetail()).isEqualTo("OUTCOME_UNRESOLVED");
         assertThat(participants.releases).isZero();
     }
+    // Fail-fast refusals (ADR-015: an open circuit is not a rejection and not proof of no commit).
+    @Test void openCircuitBeforeAnyEffectSuspendsWithoutCompensationRetryOrPause() {
+        AtomicInteger pauses=new AtomicInteger();
+        var guarded=new RegisterSale(store,store,participants,clock,UUID::randomUUID,n->pauses.incrementAndGet(),3);
+        participants.circuitOpen.add("reserve-stock");
+        Saga saga=start(); guarded.execute(saga.id());
+        Saga row=store.find(saga.id()).orElseThrow();
+        assertThat(row.status()).isEqualTo(Saga.Status.RUNNING); assertThat(row.failedStep()).isNull();
+        assertThat(row.errorDetail()).isEqualTo("OUTCOME_UNRESOLVED");
+        assertThat(row.execution().attempts()).isEqualTo(1); // the persisted pre-dispatch attempt is consumed, never replenished
+        assertThat(row.execution().pendingStep()).isEqualTo("reserve-stock");
+        assertThat(pauses).hasValue(0); assertThat(participants.reservations).isZero(); assertThat(participants.releases).isZero();
+    }
+    @Test void openCircuitAfterAnEarlierAmbiguousSaleDoesNotCompensateAndRetainsTheReservation() {
+        participants.loseSaleResponse = true; participants.circuitAfterLost = true;
+        Saga saga = start(); usecase.execute(saga.id());
+        Saga row = store.find(saga.id()).orElseThrow();
+        assertThat(participants.sales).isEqualTo(1); // the first attempt may have committed
+        assertThat(row.status()).isEqualTo(Saga.Status.RUNNING); assertThat(row.failedStep()).isNull();
+        assertThat(row.errorDetail()).isEqualTo("OUTCOME_UNRESOLVED");
+        assertThat(row.reservation().reservationId()).isEqualTo(participants.reservation);
+        assertThat(participants.releases).isZero(); assertThat(participants.releaseCalls).isZero();
+    }
+    @Test void openCircuitDuringCompensationNeverClaimsReleaseAndRetainsTheReservation() {
+        participants.reject = "register-sale"; participants.circuitOpen.add("release-stock");
+        Saga saga = start(); usecase.execute(saga.id()); usecase.execute(saga.id());
+        Saga row = store.find(saga.id()).orElseThrow();
+        assertThat(row.status()).isEqualTo(Saga.Status.FAILED); assertThat(row.status()).isNotEqualTo(Saga.Status.COMPENSATED);
+        assertThat(row.failedStep()).isEqualTo("register-sale"); assertThat(row.reservation()).isNotNull();
+        assertThat(participants.releases).isZero(); assertThat(participants.releaseCalls).isZero();
+    }
+    @Test void confirmedRejectionWithoutAnEarlierAmbiguousAttemptStillCompensates() {
+        participants.reject = "register-sale";
+        Saga saga = start(); usecase.execute(saga.id()); usecase.execute(saga.id());
+        assertThat(store.find(saga.id()).orElseThrow().status()).isEqualTo(Saga.Status.COMPENSATED);
+        assertThat(participants.releases).isEqualTo(1);
+    }
     @Test void resultSaveFailureStopsNextStepAndRestartReplaysCommittedReservation() {
         store.failWhenStep = "reserve-stock";
         Saga saga = start(); assertThatThrownBy(() -> usecase.execute(saga.id())).isInstanceOf(WorkflowError.class);
@@ -189,9 +226,11 @@ class RegisterSaleTest {
         final UUID reservation=UUID.randomUUID(), sale=UUID.randomUUID();
         final List<String> keys=new ArrayList<>(),correlations=new ArrayList<>();
         int reservations,sales,releases,reserveCalls,releaseCalls;
-        String reject; boolean releaseFailure,loseSaleResponse,rejectAfterLost,transientReservation;
+        String reject; boolean releaseFailure,loseSaleResponse,rejectAfterLost,transientReservation,circuitAfterLost;
         Saga registered;
+        Set<String> circuitOpen=new HashSet<>();
         void check(String step,String key,String trace) {
+            if(circuitOpen.contains(step)) throw new ParticipantFailure(ParticipantFailure.Kind.CIRCUIT_OPEN); // fail-fast: nothing dispatched
             keys.add(key);correlations.add(trace);
             if(step.equals(reject)) throw new ParticipantFailure(ParticipantFailure.Kind.REJECTED);
         }
@@ -202,6 +241,7 @@ class RegisterSaleTest {
             reservations=1; return new Reservation(reservation,List.of(new Reservation.Line(product,2,125)));
         }
         public UUID register(Saga saga,String key,String trace) {
+            if(sales==1 && circuitAfterLost) throw new ParticipantFailure(ParticipantFailure.Kind.CIRCUIT_OPEN);
             check("register-sale",key,trace);registered=saga;
             if(sales==1 && rejectAfterLost) throw new ParticipantFailure(ParticipantFailure.Kind.REJECTED);
             sales=1;

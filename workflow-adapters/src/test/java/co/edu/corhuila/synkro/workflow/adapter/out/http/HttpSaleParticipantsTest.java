@@ -76,7 +76,7 @@ class HttpSaleParticipantsTest {
         body="sentinel-driver-password-url";
         for(int code:List.of(400,404,422,401,403,408,429,500,502,503,504,501,505,409,415,418)) {
             status=code;
-            ParticipantFailure.Kind expected=code==401||code==403?ParticipantFailure.Kind.AUTHORIZATION:Set.of(408,429,500,502,503,504).contains(code)?ParticipantFailure.Kind.TRANSIENT:ParticipantFailure.Kind.INVALID_RESPONSE;
+            ParticipantFailure.Kind expected=code==401||code==403?ParticipantFailure.Kind.AUTHORIZATION:Set.of(429,500,502,503,504).contains(code)?ParticipantFailure.Kind.TRANSIENT:ParticipantFailure.Kind.INVALID_RESPONSE;
             assertThatThrownBy(()->client.reserve(input,"key","trace")).isInstanceOf(ParticipantFailure.class)
                 .hasMessage(expected.name()).extracting(e->((ParticipantFailure)e).kind()).isEqualTo(expected);
         }
@@ -154,6 +154,46 @@ class HttpSaleParticipantsTest {
             var participant=faultClient(cause);
             assertThatThrownBy(()->participant.register(reservedSaga(),"key","trace")).hasMessage(expected);
             assertSuspendedWithoutRetry(participant);
+        }
+    }
+    @Test void status408IsNotAnApprovedRetryCategoryAndIsNeverRetried() {
+        status=408;body=error("VALIDATION_ERROR");seen.clear();
+        assertThatThrownBy(()->client.register(reservedSaga(),"key","trace")).hasMessage("INVALID_RESPONSE");
+        assertSuspendedWithoutRetry(client);assertThat(seen).hasSize(2); // one call per direct call/saga run, none repeated
+    }
+    @Test void onlyApprovedStatusesAreTransientAndOthersNeverRetry() {
+        for(int code:List.of(429,500,502,503,504)) {status=code;body="x";assertThatThrownBy(()->client.register(reservedSaga(),"k","trace")).hasMessage("TRANSIENT");}
+        for(int code:List.of(400,404,408,409,410,413,415,422,425,431,501,505)) {
+            status=code;body="x";assertThatThrownBy(()->client.register(reservedSaga(),"k","trace")).hasMessage("INVALID_RESPONSE");
+        }
+        for(int code:List.of(401,403)) {status=code;assertThatThrownBy(()->client.register(reservedSaga(),"k","trace")).hasMessage("AUTHORIZATION");}
+    }
+    @Test void unclassifiedIOExceptionsAreNotBlindlyRetried() {
+        for(Throwable cause:List.of(new java.io.IOException("secret-sentinel"),new java.io.UncheckedIOException(new java.io.IOException("secret-sentinel")),
+                new java.nio.channels.UnresolvedAddressException(),new javax.net.ssl.SSLException("secret-sentinel"))) {
+            var participant=faultClient(cause);
+            assertThatThrownBy(()->participant.register(reservedSaga(),"key","trace")).hasMessage("LOCAL_FAILURE");
+            assertSuspendedWithoutRetry(participant);
+        }
+    }
+    @Test void classifiedTransportCausesInsidePlainIoWrappersRemainRetryable() {
+        for(Throwable cause:List.of(new java.io.EOFException("response lost"),
+                new java.net.ConnectException("connection refused"),new HttpTimeoutException("timeout"))) {
+            var wrapped=new java.io.IOException("transport wrapper",new java.io.IOException("nested wrapper",cause));
+            assertThatThrownBy(()->faultClient(wrapped).register(reservedSaga(),"key","trace")).hasMessage("TRANSIENT");
+        }
+    }
+    @Test void wrappingDoesNotTurnTlsOrProgrammingFailuresIntoTransientTransport() {
+        var tls=new javax.net.ssl.SSLException("TLS failure",new java.io.EOFException("closed during TLS"));
+        for(Throwable failure:List.of(new java.io.IOException("wrapper",tls),
+                new IllegalStateException("programming",new java.io.EOFException("nested")))) {
+            assertThatThrownBy(()->faultClient(failure).register(reservedSaga(),"key","trace")).hasMessage("LOCAL_FAILURE");
+        }
+    }
+    @Test void classifiedTransientIOFamiliesAreRetryable() {
+        for(Throwable cause:List.of(new java.net.http.HttpConnectTimeoutException("timeout"),new java.net.SocketTimeoutException("timeout"),
+                new java.net.SocketException("reset"),new java.nio.channels.ClosedChannelException())) {
+            assertThatThrownBy(()->faultClient(cause).register(reservedSaga(),"key","trace")).hasMessage("TRANSIENT");
         }
     }
     @Test void actualAsyncTransportFailuresRemainBoundedAndRecoverable() {

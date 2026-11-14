@@ -9,3 +9,5 @@ target/
 !*.env.example
 .DS_Store
 __pycache__/
+# Ad-hoc local run logs belong outside the repository, never at its root.
+/.evidence-*.log
