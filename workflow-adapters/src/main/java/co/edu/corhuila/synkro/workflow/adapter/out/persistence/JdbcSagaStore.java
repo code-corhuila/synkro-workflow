@@ -52,8 +52,8 @@ public final class JdbcSagaStore implements SagaStore,ExecutionCoordinator {
     }
     public Optional<Lease> tryOwn(UUID id) {
         Connection c=null;
-        int a=(int)(id.getMostSignificantBits()^(id.getMostSignificantBits()>>>32));
-        int b=(int)(id.getLeastSignificantBits()^(id.getLeastSignificantBits()>>>32));
+        int a=WorkflowLockKey.NAMESPACE;
+        int b=WorkflowLockKey.value(id);
         try {
             c=connect();
             try(var s=c.createStatement()){s.execute("SET application_name='synkro-workflow-owner'");}
