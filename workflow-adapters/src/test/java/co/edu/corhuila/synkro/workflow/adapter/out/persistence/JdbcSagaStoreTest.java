@@ -62,11 +62,21 @@ class JdbcSagaStoreTest {
         Saga saga=saga("fence-"+UUID.randomUUID());store.create(saga);
         var stale=store.tryOwn(saga.id()).orElseThrow();stale.load();
         sql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename='workflow_app' AND application_name='synkro-workflow-owner'");
-        try(var successor=store.tryOwn(saga.id()).orElseThrow()) {
+        try(var successor=awaitOwner(saga.id())) {
             Saga progress=successor.load().success("validate-customer",null,null,Instant.now());successor.save(progress);
             assertThatThrownBy(()->stale.save(saga)).isInstanceOf(WorkflowError.class);
         } finally { stale.close(); }
         assertThat(store.find(saga.id()).orElseThrow().completedSteps()).containsExactly("validate-customer");
+    }
+    /** Backend termination is asynchronous: poll (bounded) until the dead session's lock is released. */
+    static co.edu.corhuila.synkro.workflow.application.port.out.ExecutionCoordinator.Lease awaitOwner(UUID id) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+        while(true) {
+            var owned=store.tryOwn(id);
+            if(owned.isPresent())return owned.get();
+            if(System.nanoTime()>deadline)throw new AssertionError("lock of the terminated session was not released in time");
+            Thread.sleep(25);
+        }
     }
     @Test void isolatedHistoryNoopAndRestrictedEffectivePermissions() throws Exception {
         assertThat(flyway.migrate().migrationsExecuted).isZero();
