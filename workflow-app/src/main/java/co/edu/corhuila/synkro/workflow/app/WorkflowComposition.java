@@ -5,6 +5,7 @@ import co.edu.corhuila.synkro.workflow.adapter.out.persistence.JdbcSagaStore;
 import co.edu.corhuila.synkro.workflow.adapter.out.http.HttpSaleParticipants;
 import co.edu.corhuila.synkro.workflow.adapter.out.http.CircuitProtectedParticipants;
 import co.edu.corhuila.synkro.workflow.adapter.out.http.FullJitterRetryDelay;
+import co.edu.corhuila.synkro.workflow.adapter.out.logging.Slf4jAuditTrail;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zaxxer.hikari.*;
 import org.springframework.context.annotation.*;
@@ -35,8 +36,9 @@ public class WorkflowComposition {
         var http=new HttpSaleParticipants(client,json,URI.create(customers),URI.create(products),URI.create(sales),()->file.isBlank()?token:secret(file),Duration.ofSeconds(3));
         return new CircuitProtectedParticipants(http,clock());
     }
-    @Bean RegisterSale usecase(SagaStore store,ExecutionCoordinator coordination,SaleParticipants participants,Clock clock){
-        return new RegisterSale(store,coordination,participants,clock,UUID::randomUUID,FullJitterRetryDelay.system(),3);
+    @Bean AuditTrail auditTrail(){return new Slf4jAuditTrail();}
+    @Bean RegisterSale usecase(SagaStore store,ExecutionCoordinator coordination,SaleParticipants participants,Clock clock,AuditTrail audit){
+        return new RegisterSale(store,coordination,participants,clock,UUID::randomUUID,FullJitterRetryDelay.system(),3,audit);
     }
     @Bean BackgroundExecution background(SagaStore store,RegisterSale usecase,@Value("${WORKFLOW_EXECUTORS:4}") int capacity,@Value("${WORKFLOW_QUEUE:64}") int queue,@Value("${WORKFLOW_SCAN_INTERVAL_MS:1000}") long interval){
         return new BackgroundExecution(store,usecase,capacity,queue,interval);
