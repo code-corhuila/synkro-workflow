@@ -43,7 +43,7 @@ class WorkflowResilienceCompositionTest {
             public List<UUID> running(int limit){return List.of();}
             public boolean healthy(){return true;}
         };
-        return composition.usecase(store,none,participants(),Clock.systemUTC());
+        return composition.usecase(store,none,participants(),Clock.systemUTC(),AuditTrail.NONE);
     }
 
     @Test void theParticipantsPortIsTheCircuitDecoratorOverTheRealHttpAdapter() throws Exception {
