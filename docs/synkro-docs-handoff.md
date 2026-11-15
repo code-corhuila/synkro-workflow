@@ -1,10 +1,23 @@
 # Workflow documentation handoff
 
+## HU-WKF-04 main promotion — current handoff
+
+Fresh release-candidate verification now passed121 Java tests, four guards,93.92% global LINE,44 controlled process checks and21 separate actual-participant checks, with unchanged source inputs and two cleanups. Main approval/merge, persistent rollout/scenario3 and downstream documentation closure remain pending; these source checks do not complete them.
+
+Reuse [DOCS-98/#266](https://github.com/code-corhuila/synkro-docs/issues/266) and [HU-WKF-04/#316](https://github.com/code-corhuila/synkro-docs/issues/316); open no new issue and add no synkro-docs file. The existing-file list in the QA addendum below applies unchanged; Accepted ADR-015 stays unchanged.
+
+- Main baseline `09a193866f05f3714a0bd1ad6d7559a9f00b3611`; branch `release/workflow-resilience` carries eight `cherry-pick -x` reapplications of commits reachable from QA merge `269a687dd10dc94d7a3043fe63075884f0da30c9`, ending at `f1540a5051d887bb20c8d433f2385c2d413186d4` (full QA → main mapping in [execution-report.md](execution-report.md)). No conflicts; the tree matches the integrated QA tree before the documentation-only changes.
+- Behavior is unchanged: no version bump, new functionality, schema, migration or public contract change. Pact position is as recorded in the QA addendum (no Pact run, artifact or waiver).
+- Release verification passed as recorded above. Still to record when they actually exist: publication of the main PR and its head, actual `ariel5253` approval on the delivered main head with CODEOWNERS/conversation/team-review evidence, and the user's main merge. No earlier approval transfers; no tag is requested.
+- Keep separate: debt closure (TD-014/015/016 stay open until their own gates; TD-012 remains open and excluded), and the persistent deployment / coordinated lock-algorithm rollout / scenario 3, which are unexecuted. A source promotion establishes none of them.
+
+---
+
 ## HU-WKF-04 QA promotion — handoff addendum
 
 Reuse [DOCS-98/#266](https://github.com/code-corhuila/synkro-docs/issues/266) and [HU-WKF-04/#316](https://github.com/code-corhuila/synkro-docs/issues/316); open no new issue and add no synkro-docs file. The corrective PR18 was merged into develop as `59e3107ceff9c76bf2bacb993db556fb5a0e157f` (feature head `e2fe763fde2ccd55d00c8dc4b7b6e46165f9aca8`) by the owner, with an empty API review list; record it as an owner merge, not an accepted review. Original PR17 was closed without merge and its confirmed TDD deviation stays recorded.
 
-QA promotion: child `qa-workflow-resilience` carries the seven `cherry-pick -x` reapplications of the corrective commits (develop → QA mapping in [execution-report.md](execution-report.md)), ending at `39fcf1cf1842a42ac6a92077fe6ee5250d76615c`. Report its actual publication and merge only after they exist. Fresh QA-candidate verification passed121 Java tests, four Python guards,93.92% global LINE,44 controlled process checks and21 separate actual-participant checks; the older counts below retain their original develop-delivery attribution. QA integration is still pending; the verification runs do not establish a persistent deployment. Main promotion (`release/<description>` from actual `origin/main`, with actual `ariel5253` approval on the delivered head) is also pending.
+QA promotion: child `qa-workflow-resilience` carried the seven `cherry-pick -x` reapplications of the corrective commits (develop → QA mapping in [execution-report.md](execution-report.md)), ending at `39fcf1cf1842a42ac6a92077fe6ee5250d76615c`, plus the documentation-only head `487d1964d6879b8cf3048e255b37b4af7880df48`. QA PR19 was merged into `qa` as `269a687dd10dc94d7a3043fe63075884f0da30c9` on 2026-11-14 19:07:38 America/Bogota (2026-11-15 00:07:38 UTC); the merge tree equals the delivered QA tree. The API review list was empty: record it as an owner integration action, not an independent approval. Fresh QA-candidate verification passed 121 Java tests, four Python guards, 93.92% global LINE, 44 controlled process checks and 21 separate actual-participant checks; the older counts below retain their original develop-delivery attribution. These runs do not establish a persistent deployment.
 
 Pact: record that Tier 3b of `11-quality/testing-strategy.md` requires no new or regenerated Pact for a change that adds or alters no HTTP call; its Pact matrix covers the CLI-05/VEN-20 portals, not Workflow. The promoted change leaves request construction unchanged and affects lock keys, retry classification/backoff and a port decorator. No Pact run or exception exists; do not describe controlled-fixture or real-service acceptance as Pact.
 

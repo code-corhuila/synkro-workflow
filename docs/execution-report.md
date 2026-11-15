@@ -1,8 +1,58 @@
 # Workflow execution evidence
 
-## HU-WKF-04 QA promotion — current status
+## HU-WKF-04 main promotion — current status
 
-Source promotion of the corrective delivery below; no new behavior. This subsection records status only and does not replace the evidence that follows.
+Source promotion of the integrated QA line to main; no new behavior, version bump or functionality. Status only; it does not replace the evidence that follows.
+
+- QA PR19 merged into `qa` on 2026-11-14 19:07:38 America/Bogota (2026-11-15 00:07:38 UTC) as `269a687dd10dc94d7a3043fe63075884f0da30c9`; delivered QA head `487d1964d6879b8cf3048e255b37b4af7880df48`; merge tree equals the delivered QA tree. The review API list was empty: this is the owner's integration action; no independent review or approval was observed.
+- Main baseline `09a193866f05f3714a0bd1ad6d7559a9f00b3611`. Branch `release/workflow-resilience` was cut from `origin/main`; eight `cherry-pick -x` applications of commits reachable from `269a687` succeeded without conflicts. Its tree at `f1540a5051d887bb20c8d433f2385c2d413186d4` matches the integrated QA tree before the documentation-only changes of this promotion.
+
+| Actual QA source | Main release reapplication |
+|---|---|
+| `2af943609e97c17cf220fc2a9bd6f70b526502c0` | `a856fa124bfe6a667fdd0d2513a8b0ba340d3ba6` |
+| `1fd9193bc302968f01fa47961de6703d1ae38e08` | `80bedae02c8de42c8b314e29c3d34e545baacf40` |
+| `da2c01c9e10dde392125ed589c56ffcaf46f38d6` | `c43e9bdefc2cdf8f54e4300bd78319a18a6c1563` |
+| `f0de2103b8b2224629d63f1672ab69f17883ba55` | `5f9cd515e83b39b009e85db01e3bebd4aa154ff4` |
+| `0bdbb1b35e437bfa21ce49bce3277cce7f692e86` | `6186b90bcd8d8b593825b0f79ac72cef9ce4d518` |
+| `dcc6db04cd4b1a861e077ff6ab11bfa2a0903798` | `4143ace9a88501e1fe3257b706969b87e452d049` |
+| `39fcf1cf1842a42ac6a92077fe6ee5250d76615c` | `7c6763aa30f78ae7406a4c25ae9f4f4f3c7592c5` |
+| `487d1964d6879b8cf3048e255b37b4af7880df48` | `f1540a5051d887bb20c8d433f2385c2d413186d4` |
+
+| Item | Status |
+|---|---|
+| Prior fresh QA evidence (not release executions) | 121 Java tests, 4 Python guards, 93.92% global LINE, 44 controlled and 21 actual-service checks, six source pins, two owned cleanups |
+| Release verification on this branch |121 Java tests,4 guards,93.92% global LINE;44 controlled and21 actual-service checks passed |
+| Release publication | Actual publication/head status is recorded on the associated PR and HU |
+| Actual `ariel5253` approval on the delivered main head, CODEOWNERS/conversation/team-review evidence | Pending; no earlier approval transfers |
+| Main merge | Pending; performed by the user. No tag, deployment or debt closure |
+| Lock-algorithm rollout / scenario 3 | Unexecuted; source promotion is not a deployment |
+
+### Fresh release execution record
+
+Fresh release-candidate execution passed **121 Java tests** (core16/adapters93/app12), zero failures/errors/skips; LINE global93.92%, domain100%, application98.25%, infrastructure92.75%; four Python guards and core architecture/protected-file checks. Controlled real Workflow/PostgreSQL acceptance **44/44** and separate actual Customers/Products/Sales acceptance **21/21** passed, with six exact clean snapshots and two owned disposable cleanups. These are executions of this release candidate, distinct from the earlier QA runs. They do not establish main integration, a tag, persistent deployment or a new global21-suite acceptance.
+
+Verified source head before promotion-only documentation: `f1540a5051d887bb20c8d433f2385c2d413186d4`. All runtime, configuration and test inputs stayed unchanged during execution and match the actual QA-integrated tree. Eight QA→release provenance footers were checked against ancestors of the actual QA merge. Only the three promotion Markdown files change afterward; actual publication/head status is recorded on the PR and HU rather than inventing a self-referential SHA.
+
+| Actual participant snapshot | Commit |
+|---|---|
+| synkro-customers-api | `8f39ac8f105772a60ba8c4cc6cd90e101f44db6e` |
+| synkro-customers-db | `a5aebc5dfb2408ce3a2550f604d135bceacf4207` |
+| synkro-products-api | `af06bb056fedb7b9f83d518436c3370a0f1373d1` |
+| synkro-products-db | `0beae79920d9af83865bdebaf6b316a2b2a57592` |
+| synkro-sales-api | `6ef40cfa8761231cfba80c2183d2fb0b1a06e895` |
+| synkro-sales-db | `e2168fb52f693892b8bbec4c60597b330abeb845` |
+
+| Release execution | Log SHA-256 |
+|---|---|
+| `main-reactor` | `d047e6ef76f60e8c6d925a2b39603fb65012fa2b98016ca20a2ef0cf93ac6ea8` |
+| `process-main` | `539f29483d0f85eb5effecfdddc0bbf1703505f3f21b750e6e6a75fbaf5fb526` |
+| `real-main` | `c1cd4370286b4f3e7790f93184a07ea799abd6c1e4cda516500debee429a0df5` |
+
+Pact: unchanged from the QA assessment below (Tier 3b; no HTTP call added or altered; no Pact run, artifact or waiver; the bounded CLI-05/VEN-20 matrix is not Workflow coverage). The original TDD RED/GREEN belongs to the implementation and is not replayed here. Claude Code edited only the three existing Markdown files; Codex handles git, verification and publication.
+
+## HU-WKF-04 QA promotion — pre-merge execution record
+
+The statements in this subsection describe the QA child before PR19 was merged; "pending" entries are historical and superseded by the main promotion status above. Source promotion of the corrective delivery below; no new behavior.
 
 - Source: corrective PR18 merged into develop on 2026-11-14 (23:39:04 UTC) as [59e3107](https://github.com/code-corhuila/synkro-workflow/commit/59e3107ceff9c76bf2bacb993db556fb5a0e157f); feature head [e2fe763](https://github.com/code-corhuila/synkro-workflow/commit/e2fe763fde2ccd55d00c8dc4b7b6e46165f9aca8), merge tree equal to feature tree. The API review list was empty: this is the owner's merge with no independent review observed, and approval is not inferred.
 - Original PR17 closed without merge; its confirmed TDD deviation and the attribution below are unchanged and not cured by this promotion.
@@ -22,13 +72,13 @@ Source promotion of the corrective delivery below; no new behavior. This subsect
 | Item | Status |
 |---|---|
 | Fresh QA tests on the child |121 Java tests,4 Python guards,93.92% global LINE;44 controlled and21 actual-service checks passed |
-| QA child publication and merge | Pending (owner merges) |
-| Main proposal (`release/<description>` from `origin/main`) | Pending; needs actual `ariel5253` approval on the delivered head plus codeowner/conversation gates |
+| QA child publication and merge | Merged as PR19 into `qa` as `269a687dd10dc94d7a3043fe63075884f0da30c9` on 2026-11-14 19:07:38 America/Bogota (owner action; no independent review observed; delivered head `487d1964d6879b8cf3048e255b37b4af7880df48`) |
+| Main proposal (`release/<description>` from `origin/main`) | Release branch prepared (see main promotion status); approval and merge pending (needs actual `ariel5253` approval on the delivered head plus codeowner/conversation gates) |
 | Lock-algorithm rollout / scenario 3 | Unexecuted; source promotion is not a deployment |
 
 ### Fresh QA execution record
 
-Fresh QA executions on the child passed: **121 Java tests** (core16/adapters93/app12), zero failures/errors/skips; LINE global93.92%, domain100%, application98.25%, infrastructure92.75%; four Python guards and core architecture/protected-file checks. Separate controlled real Workflow/PostgreSQL acceptance **44/44** and actual Customers/Products/Sales acceptance **21/21** passed, with exact clean snapshots and two owned disposable cleanups. These are fresh QA-candidate executions; no QA merge, persistent deployment or new global21-suite acceptance is inferred.
+Fresh QA executions on the child passed: **121 Java tests** (core16/adapters93/app12), zero failures/errors/skips; LINE global93.92%, domain100%, application98.25%, infrastructure92.75%; four Python guards and core architecture/protected-file checks. Separate controlled real Workflow/PostgreSQL acceptance **44/44** and actual Customers/Products/Sales acceptance **21/21** passed, with exact clean snapshots and two owned disposable cleanups. These are fresh QA-candidate executions; no persistent deployment or new global21-suite acceptance is inferred (the QA merge occurred afterwards, see above).
 
 Verified source head before the promotion-only documentation commit: `39fcf1cf1842a42ac6a92077fe6ee5250d76615c`. Runtime/test/config inputs remained unchanged during each execution, match the merged develop tree and match the final candidate after documentation-only edits. Seven provenance footers were checked against actual develop ancestors. Publication/head status belongs to the associated PR and HU; no self-referential SHA is invented.
 
