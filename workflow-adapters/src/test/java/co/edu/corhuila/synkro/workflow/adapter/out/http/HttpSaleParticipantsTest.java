@@ -76,7 +76,7 @@ class HttpSaleParticipantsTest {
         body="sentinel-driver-password-url";
         for(int code:List.of(400,404,422,401,403,408,429,500,502,503,504,501,505,409,415,418)) {
             status=code;
-            ParticipantFailure.Kind expected=code==401||code==403?ParticipantFailure.Kind.AUTHORIZATION:Set.of(408,429,500,502,503,504).contains(code)?ParticipantFailure.Kind.TRANSIENT:ParticipantFailure.Kind.INVALID_RESPONSE;
+            ParticipantFailure.Kind expected=code==401||code==403?ParticipantFailure.Kind.AUTHORIZATION:Set.of(429,500,502,503,504).contains(code)?ParticipantFailure.Kind.TRANSIENT:ParticipantFailure.Kind.INVALID_RESPONSE;
             assertThatThrownBy(()->client.reserve(input,"key","trace")).isInstanceOf(ParticipantFailure.class)
                 .hasMessage(expected.name()).extracting(e->((ParticipantFailure)e).kind()).isEqualTo(expected);
         }
