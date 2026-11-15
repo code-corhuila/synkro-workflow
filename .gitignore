@@ -9,3 +9,6 @@ target/
 !*.env.example
 .DS_Store
 __pycache__/
+
+# Keep disposable execution logs outside the repository.
+/.evidence-*.log

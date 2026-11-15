@@ -23,8 +23,7 @@ shared instance is permitted. No payment, broker, outbox or sale deletion.
 
 3. A PostgreSQL session advisory lock keeps exclusive ownership across separate
    intent/result commits without schema changes. Use the two-integer overload,
-   derived from the UUID, which has a separate key space from Auth's reserved
-   single-bigint key. Hash collisions only serialize unrelated sagas. One
+   with Workflow first key 0x57464C4B and XOR-of-four-UUID-words second key. Auth refresh uses first key 0x52544F4B; Auth initialization uses the separate single-bigint overload. Hash collisions only serialize unrelated sagas. One
    dedicated connection owns the lock and all writes; never reconnect a lease.
 
 Choose option 3 after refining the ambiguous-effect boundary. Row locks release
@@ -61,9 +60,7 @@ COMPENSATED. Release is repeatable by reservation ID, including after response
 loss. Exhausted compensation ends FAILED; preserve original forward failed_step
 and safe private compensation classification. FAILED is never auto-resumed.
 
-Retries are limited to network failures, 429 and 5xx, with exponential backoff
-and jitter. Forward ambiguous outcomes remain recoverable RUNNING after a
-bounded attempt burst; later recovery bursts use the same keys and frozen input.
+Retries are limited to classified transient transport failures and HTTP 429/500/502/503/504, with exponential full jitter. HTTP 408 and unclassified I/O are not retried. Persisted attempts cap each step at three across process restart/replay; there is no new recovery burst after exhaustion. Forward uncertainty stays RUNNING with private OUTCOME_UNRESOLVED and is excluded from automatic scanning. Existing keys and frozen input remain authoritative.
 There is no manufactured terminal success. Authorization failures are not
 transient retries. Diagnostics use fixed classifications, never exception text,
 participant bodies, connection strings or credentials.
