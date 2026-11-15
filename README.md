@@ -1,52 +1,142 @@
 # synkro-workflow
 
-> Business process orchestration (saga)
+> Durable sale-registration saga that validates the customer, reserves stock, persists the sale and compensates failed flows.
 
-Part of the **SynkroTech SAS Sales Management System** — organization `code-corhuila`.
-Governance and documentation live in [`synkro-docs`](https://github.com/code-corhuila/synkro-docs).
+Part of the **SynkroTech SAS Sales Management System**. Architecture, decisions and
+contracts live in [synkro-docs](https://github.com/code-corhuila/synkro-docs).
 
-## Register-sale Workflow
+**Quick start:** prepare workflow_app and the workflow_schema migrations through infrastructure, then start the owning Docker service with its protected inputs. See [Getting started](#getting-started).
 
-The Maven modules retain hexagonal ownership: workflow-core contains domain/use cases/ports; workflow-adapters contains HTTP/security, participant clients and PostgreSQL persistence; workflow-app composes dependencies and the bounded background lifecycle.
+## What it does
 
-POST /api/v1/sagas/register-sale authenticates ADMIN/SALESPERSON with local Auth RS256 verification, validates 1–100 UUID product lines and positive integer quantities, and creates a durable resource before any external effect. First creation returns 201 with Location; equivalent caller/input replay returns 200. The approved conflicting replay policy is generic 403 for another caller and 400 for different normalized input. GET /api/v1/sagas/{id} returns only the documented public projection.
+- Coordinates Customers, Products and Sales through their published HTTP contracts.
+- Stores each saga durably before external effects and exposes its public state.
+- Uses step-specific idempotency and releases reservations when compensation is required.
+- Applies bounded retries, full jitter, participant circuits and the delivered WFLK advisory-lock namespace.
+- Owns workflow_schema migrations inside db/; infrastructure owns the database instance.
 
-Read [execution design](docs/persistent-register-sale-design.md), [deployment and recovery](docs/deployment-and-recovery.md), and the [prepared documentation handoff](docs/synkro-docs-handoff.md). Populate protected placeholders from .env.example. Bootstrap workflow_app through infrastructure, run the owning workflow-db-migrate tooling service against shared synkro-db, then start Workflow on internal 8080. Public /health checks the actual saga store.
+## Where it fits
 
-## Workflow resilience correction (HU-WKF-04)
+```mermaid
+sequenceDiagram
+  participant H as synkro-front / Sales portal
+  participant G as synkro-api-gateway
+  participant W as synkro-workflow
+  participant C as synkro-customers-api
+  participant P as synkro-products-api
+  participant S as synkro-sales-api
+  H->>G: POST register-sale
+  G->>W: POST /api/v1/sagas/register-sale
+  W->>C: Validate active customer
+  W->>P: Reserve stock
+  W->>S: Register sale
+  alt confirmed participant failure after reservation
+    W->>P: Release reservation
+  end
+  H->>G: GET saga state
+  G->>W: GET /api/v1/sagas/{id}
+```
 
-The [test-first design](docs/tdd-remediation-design.md) and [execution report](docs/execution-report.md) identify the new remedial delivery separately from original PR17. Workflow uses the WFLK advisory namespace, approved retry categories with full jitter, and one circuit per participant (Products reserve/release share state). Open circuits preserve uncertain reservations. The [stop-all rollout procedure](docs/deployment-and-recovery.md#coordinated-lock-algorithm-switch--not-executed) must precede an actual algorithm switch.
+The browser enters through the gateway. The saga's service identity performs participant calls; the human initiator remains the sale author. Recovery and coordinated lock-algorithm rollout are explicit operations.
 
-## Validation
+## Tech stack
 
-```bash
+| Component | Choice |
+|---|---|
+| Language / framework | Java 21; Spring Boot 3.5.0 |
+| Build | Maven: workflow-core, workflow-adapters, workflow-app |
+| Persistence | PostgreSQL workflow_schema; Flyway tooling runner |
+| Runtime | Internal HTTP 8080 and bounded background execution |
+
+## Dependencies
+
+| Depends on | Purpose | Configuration |
+|---|---|---|
+| PostgreSQL | Durable saga state | WORKFLOW_DATABASE_URL and protected workflow_app password |
+| Customers / Products / Sales APIs | Saga participants | Internal platform addresses |
+| Auth public key and SERVICE token | Validate human callers and authorize participant requests | JWT_PUBLIC_KEY_PATH; WORKFLOW_SERVICE_TOKEN |
+
+## Getting started
+
+Use **PowerShell or Bash** with the sibling workspace prepared. From `synkro-infra-postgres`, after PostgreSQL and workflow_app exist:
+
+```text
+python scripts/synkro.py migrate dev --mode postgres-migrations --domain workflow
+```
+
+From this repository root, the owning `deploy/compose.yml` supplies the service and migration runner. Populate its committed example inputs before startup; use root composition for the complete platform. A coordinated stop-all procedure is required when switching advisory-lock algorithms.
+
+For the complete platform, start from [synkro-infra-postgres](https://github.com/code-corhuila/synkro-infra-postgres).
+
+## Configuration
+
+The committed [.env.example](.env.example) is the configuration inventory.
+Its values are examples; required inputs and defaults follow its comments and the
+owning implementation. Keep real secrets in protected local files.
+
+| Variable | Purpose |
+|---|---|
+| `FLYWAY_URL` | Connection address, origin or build-time entry point |
+| `FLYWAY_USER` | Connection or administrator identity |
+| `FLYWAY_PASSWORD` | Credential supplied locally |
+| `WORKFLOW_DATABASE_URL` | Connection address, origin or build-time entry point |
+| `WORKFLOW_APP_PASSWORD_PATH` | Protected credential file path |
+| `JWT_PUBLIC_KEY_PATH` | Identity key input; keep private material outside Git |
+| `WORKFLOW_SERVICE_TOKEN` | Service identity or token lifetime; see the configuration comments |
+| `PLATFORM_NETWORK` | Docker network selection |
+| `WORKFLOW_EXECUTORS` | Workflow executors |
+| `WORKFLOW_QUEUE` | Workflow queue |
+| `WORKFLOW_RESPONSE_TIMEOUT_MS` | Workflow response timeout ms |
+
+## Interface
+
+| Method / route | Access / result |
+|---|---|
+| POST /api/v1/sagas/register-sale | ADMIN / SALESPERSON; Idempotency-Key; 201 or same-request 200 |
+| GET /api/v1/sagas/{id} | Authorized human saga-state lookup |
+| GET /health | Public; probes the durable saga store |
+
+The request contains customerId and 1–100 product/quantity lines. Public states are RUNNING, COMPLETED, COMPENSATED and FAILED. The [Workflow contract](https://github.com/code-corhuila/synkro-docs/blob/main/07-api/contracts/openapi/synkro-workflow.yaml) defines exact semantics.
+
+## Project structure
+
+```text
+workflow-core/       domain, use cases and ports
+workflow-adapters/   HTTP/security, participant clients and JDBC
+workflow-app/        composition and execution lifecycle
+db/                  owning Flyway migrations and reversions
+deploy/              service and migration runner
+tests/               process and exact-pin real-participant checks
+docs/                resilience design and rollout procedures
+```
+
+## Testing
+
+```text
 mvn -B verify
 python tests/check_coverage.py
 python -m unittest discover -s tests -p test_deployment.py
-python -m pip install cryptography==46.0.3
-python tests/process_acceptance.py
-# Real services: see tests/real_services_acceptance.py for the six exact --pin inputs.
 ```
 
-The owner CI needs no private sibling checkout. The process suite uses disposable real PostgreSQL and the actual Workflow JVM with controlled HTTP participants, including interruption after effects commit and failed local result writes. It removes its owned resources.
+`tests/process_acceptance.py` uses a real disposable PostgreSQL/JVM with controlled HTTP participants. `tests/real_services_acceptance.py` additionally requires six exact participant pins. The old hybrid Customers-501 expectation is historical, not a current-provider acceptance check.
 
-For local hybrid evidence, use clean immutable participant snapshots and run python tests/hybrid_acceptance.py --workspace /path/to/snapshots. Exact pins are checked before execution. The historical Customers 501 on GET /api/v1/customers/{id} does not describe Customers v2.0.0, which serves that operation; tests/hybrid_acceptance.py still asserts the old 501 and is kept only as historical controlled/hybrid evidence, not as a check against current Customers. tests/real_services_acceptance.py checks exact clean Customers/Products/Sales API and DB revisions without a controlled participant. Its latest executed scope and limits are in docs/execution-report.md; HU closure remains separate from a successful scoped run.
+## Branching and contributing
 
-## Branching
+Use a `feat/`, `fix/` or `chore/` child branch and a PR into `develop`.
+Permanent branches are `develop`, `qa` and `main`; none accepts direct commits.
+Promote through a `qa-<description>` or release child with `git cherry-pick -x`.
+`main` requires approval from `ariel5253`. Use English Conventional Commits.
+See [Git conventions](https://github.com/code-corhuila/synkro-docs/blob/main/00-governance/git-conventions.md).
 
-Three permanent branches. **None of them accepts a direct commit** — you enter through a child
-branch and leave through a Pull Request.
+## Further documentation
 
-```
-develop  <--PR--  feat/... fix/... chore/...
-qa       <--PR--  qa/...
-main     <--PR--  release/...  hotfix/...
-```
+- [Saga operations](docs/saga-operations.md).
+- [Resilience and rollout](docs/resilience-and-rollout.md).
+- [Testing](docs/testing.md).
+- [Domain rules](https://github.com/code-corhuila/synkro-docs/blob/main/02-domain/entities-and-rules.md), [contracts](https://github.com/code-corhuila/synkro-docs/tree/main/07-api/contracts/openapi) and [testing strategy](https://github.com/code-corhuila/synkro-docs/blob/main/11-quality/testing-strategy.md).
 
-Promotion happens **by re-application** (`git cherry-pick -x`), never by merging one permanent
-branch into another: `merge develop -> qa` and `merge qa -> main` do not exist in this model.
-
-`main` requires **1 approval from `ariel5253`**. On `develop` and `qa` the team sets its own review
-rule.
-
-Full policy: `00-governance/branching-policy.md` in `synkro-docs`.
+<!-- Preserve previously published README section links. -->
+<a id="register-sale-workflow"></a>
+<a id="workflow-resilience-correction-hu-wkf-04"></a>
+<a id="validation"></a>
+<a id="branching"></a>
