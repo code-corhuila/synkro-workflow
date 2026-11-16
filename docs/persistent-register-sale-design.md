@@ -94,9 +94,12 @@ step_results.execution (correlationId, pendingStep, attempts).
 Persist pendingStep before each mutating call; a preexisting pendingStep means
 the prior effect is ambiguous. A definitive rejection from a fresh attempt can
 compensate; a rejection after a preexisting pendingStep cannot. Attempts persist
-before the call so process death cannot reset the retry budget. After exhaustion,
-forward ambiguity stays RUNNING with OUTCOME_UNRESOLVED; automatic loops do not
-reset its budget. This changes no schema/public fields and goes to docs review.
+before the call so process death cannot reset the retry budget. After transient
+exhaustion or an open circuit, the step is deferred (RETRY_DEFERRED) and retried
+forward with the same key in later rounds with growing waits; untrustworthy
+outcomes, and steps that exhaust every round, stay RUNNING with OUTCOME_UNRESOLVED
+for an operator. The public projection adds only `recovery`; see
+[deployment and recovery](deployment-and-recovery.md#deferred-retry-of-unavailable-participants).
 Do not change published input semantics or add schema columns to hide this gap.
 
 ## Verification boundaries

@@ -2,6 +2,7 @@ package co.edu.corhuila.synkro.workflow;
 
 import co.edu.corhuila.synkro.workflow.domain.model.*;
 import co.edu.corhuila.synkro.workflow.application.port.out.*;
+import co.edu.corhuila.synkro.workflow.application.usecase.DeferralSchedule;
 import co.edu.corhuila.synkro.workflow.application.usecase.RegisterSale;
 import org.junit.jupiter.api.Test;
 import java.time.*;
@@ -112,6 +113,83 @@ class RegisterSaleTest {
         Saga saga = start(); usecase.execute(saga.id()); usecase.execute(saga.id());
         assertThat(store.find(saga.id()).orElseThrow().status()).isEqualTo(Saga.Status.RUNNING);
         assertThat(store.find(saga.id()).orElseThrow().errorDetail()).isEqualTo("OUTCOME_UNRESOLVED");
+        assertThat(store.find(saga.id()).orElseThrow().recovery()).isEqualTo(Saga.Recovery.OPERATOR_REQUIRED);
+        assertThat(participants.releases).isZero();
+    }
+    @Test void salesOutageDefersThenCompletesTheSaleExactlyOnceWhenSalesReturns() {
+        var time = new MutableClock(clock.instant());
+        var recovering = new RegisterSale(store, store, participants, time, UUID::randomUUID, millis -> {}, 3);
+        participants.salesDown = true;
+        Saga saga = recovering.start(input, caller, "key-12345", "correlation").saga(); recovering.execute(saga.id());
+
+        Saga deferred = store.find(saga.id()).orElseThrow();
+        assertThat(deferred.status()).isEqualTo(Saga.Status.RUNNING);
+        assertThat(deferred.recovery()).isEqualTo(Saga.Recovery.AUTOMATIC_RETRY);
+        assertThat(deferred.completedSteps()).containsExactly("validate-customer", "reserve-stock");
+        assertThat(deferred.reservation()).isNotNull();
+        int callsWhileDown = participants.registerCalls;
+        recovering.execute(saga.id());
+        assertThat(participants.registerCalls).as("no new attempt before the deferred retry is due").isEqualTo(callsWhileDown);
+
+        participants.salesDown = false; time.advance(Duration.ofSeconds(30));
+        recovering.execute(saga.id());
+
+        Saga done = store.find(saga.id()).orElseThrow();
+        assertThat(done.status()).isEqualTo(Saga.Status.COMPLETED);
+        assertThat(done.recovery()).isNull();
+        assertThat(done.saleId()).isEqualTo(participants.sale);
+        assertThat(participants.saleCommits).isEqualTo(1);
+        assertThat(participants.reserveCalls).isEqualTo(1);
+        assertThat(participants.releases).isZero();
+        assertThat(participants.keys).filteredOn(key -> key.endsWith(":register-sale")).containsOnly(saga.id()+":register-sale");
+    }
+    @Test void saleCommittedBeforeTheOutageIsReplayedWithTheSameKeyAndNeverDuplicated() {
+        var time = new MutableClock(clock.instant());
+        var recovering = new RegisterSale(store, store, participants, time, UUID::randomUUID, millis -> {}, 3);
+        participants.loseSaleResponse = true; participants.outageAfterLostResponse = true;
+        Saga saga = recovering.start(input, caller, "key-12345", "correlation").saga(); recovering.execute(saga.id());
+        assertThat(store.find(saga.id()).orElseThrow().recovery()).isEqualTo(Saga.Recovery.AUTOMATIC_RETRY);
+
+        participants.salesDown = false; time.advance(Duration.ofSeconds(30));
+        recovering.execute(saga.id());
+
+        assertThat(store.find(saga.id()).orElseThrow().status()).isEqualTo(Saga.Status.COMPLETED);
+        assertThat(participants.saleCommits).isEqualTo(1);
+        assertThat(participants.releases).isZero();
+    }
+    @Test void deferredWaitsGrowAndAPersistentOutageEndsInOperatorReviewWithoutReleasingStock() {
+        var time = new MutableClock(clock.instant());
+        var schedule = new DeferralSchedule(Duration.ofSeconds(30), Duration.ofMinutes(2), 4);
+        var recovering = new RegisterSale(store, store, participants, time, UUID::randomUUID, millis -> {}, 3, AuditTrail.NONE, schedule);
+        participants.salesDown = true;
+        Saga saga = recovering.start(input, caller, "key-12345", "correlation").saga(); recovering.execute(saga.id());
+
+        var waits = new ArrayList<Duration>();
+        for (int round = 0; round < 10 && store.find(saga.id()).orElseThrow().recovery() == Saga.Recovery.AUTOMATIC_RETRY; round++) {
+            Instant retryAt = store.find(saga.id()).orElseThrow().execution().retryAt();
+            waits.add(Duration.between(time.instant(), retryAt));
+            time.set(retryAt); recovering.execute(saga.id());
+        }
+
+        assertThat(waits).containsExactly(Duration.ofSeconds(30), Duration.ofSeconds(60), Duration.ofSeconds(120), Duration.ofSeconds(120));
+        Saga suspended = store.find(saga.id()).orElseThrow();
+        assertThat(suspended.status()).isEqualTo(Saga.Status.RUNNING);
+        assertThat(suspended.recovery()).isEqualTo(Saga.Recovery.OPERATOR_REQUIRED);
+        assertThat(suspended.reservation()).isNotNull();
+        assertThat(participants.registerCalls).isEqualTo(15);
+        assertThat(participants.releases).isZero(); assertThat(participants.saleCommits).isZero();
+    }
+    @Test void operatorReviewIsNeverResumedAutomatically() {
+        var time = new MutableClock(clock.instant());
+        var recovering = new RegisterSale(store, store, participants, time, UUID::randomUUID, millis -> {}, 3);
+        participants.loseSaleResponse = true; participants.rejectAfterLost = true;
+        Saga saga = recovering.start(input, caller, "key-12345", "correlation").saga(); recovering.execute(saga.id());
+        int calls = participants.registerCalls;
+
+        time.advance(Duration.ofDays(1)); recovering.execute(saga.id());
+
+        assertThat(participants.registerCalls).isEqualTo(calls);
+        assertThat(store.find(saga.id()).orElseThrow().recovery()).isEqualTo(Saga.Recovery.OPERATOR_REQUIRED);
         assertThat(participants.releases).isZero();
     }
     @Test void resultSaveFailureStopsNextStepAndRestartReplaysCommittedReservation() {
@@ -161,6 +239,15 @@ class RegisterSaleTest {
         assertThat(participants.reserveCalls).isEqualTo(calls);
     }
 
+    static final class MutableClock extends Clock {
+        private Instant now;
+        MutableClock(Instant now) { this.now = now; }
+        void advance(Duration duration) { now = now.plus(duration); }
+        void set(Instant instant) { now = instant; }
+        public Instant instant() { return now; }
+        public ZoneId getZone() { return ZoneOffset.UTC; }
+        public Clock withZone(ZoneId zone) { return this; }
+    }
     static final class Memory implements SagaStore, ExecutionCoordinator {
         final ConcurrentMap<UUID,Saga> rows=new ConcurrentHashMap<>();
         final ConcurrentMap<UUID,Semaphore> locks=new ConcurrentHashMap<>();
@@ -188,8 +275,9 @@ class RegisterSaleTest {
     final class People implements SaleParticipants {
         final UUID reservation=UUID.randomUUID(), sale=UUID.randomUUID();
         final List<String> keys=new ArrayList<>(),correlations=new ArrayList<>();
-        int reservations,sales,releases,reserveCalls,releaseCalls;
-        String reject; boolean releaseFailure,loseSaleResponse,rejectAfterLost,transientReservation;
+        final Set<String> committedSaleKeys=new HashSet<>();
+        int reservations,sales,releases,reserveCalls,releaseCalls,registerCalls,saleCommits;
+        String reject; boolean releaseFailure,loseSaleResponse,rejectAfterLost,transientReservation,salesDown,outageAfterLostResponse;
         Saga registered;
         void check(String step,String key,String trace) {
             keys.add(key);correlations.add(trace);
@@ -202,10 +290,11 @@ class RegisterSaleTest {
             reservations=1; return new Reservation(reservation,List.of(new Reservation.Line(product,2,125)));
         }
         public UUID register(Saga saga,String key,String trace) {
-            check("register-sale",key,trace);registered=saga;
+            check("register-sale",key,trace);registered=saga;registerCalls++;
+            if(salesDown) throw new ParticipantFailure(ParticipantFailure.Kind.TRANSIENT);
             if(sales==1 && rejectAfterLost) throw new ParticipantFailure(ParticipantFailure.Kind.REJECTED);
-            sales=1;
-            if(loseSaleResponse) { loseSaleResponse=false; throw new ParticipantFailure(ParticipantFailure.Kind.TRANSIENT); }
+            sales=1; if(committedSaleKeys.add(key)) saleCommits++;
+            if(loseSaleResponse) { loseSaleResponse=false; salesDown=outageAfterLostResponse; throw new ParticipantFailure(ParticipantFailure.Kind.TRANSIENT); }
             return sale;
         }
         public void release(Reservation r,String key,String trace) {

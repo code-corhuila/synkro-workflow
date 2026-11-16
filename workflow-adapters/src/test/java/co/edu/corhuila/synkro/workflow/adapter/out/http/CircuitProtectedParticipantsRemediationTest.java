@@ -181,24 +181,24 @@ class CircuitProtectedParticipantsRemediationTest {
     }
 
     // ---------- through the use case ----------
-    @Test void openSalesBeforeDispatchSuspendsWithAtMostOneLocalAttemptAndKeepsTheReservation() {
+    @Test void openSalesBeforeDispatchDefersWithAtMostOneLocalAttemptAndKeepsTheReservation() {
         outage(Op.SALES,3);int salesCallsBefore=delegate.calls(Op.SALES);
         var store=new Store(reservedSaga());var pauses=new AtomicInteger();
         usecase(store,pauses).execute(store.row.id());
         assertThat(delegate.calls(Op.SALES)).isEqualTo(salesCallsBefore);assertThat(delegate.calls(Op.RELEASE)).isZero();
         assertThat(store.row.status()).isEqualTo(Saga.Status.RUNNING);assertThat(store.row.failedStep()).isNull();
-        assertThat(store.row.errorDetail()).isEqualTo("OUTCOME_UNRESOLVED");assertThat(store.row.reservation()).isEqualTo(reservation);
+        assertThat(store.row.errorDetail()).isEqualTo("RETRY_DEFERRED");assertThat(store.row.reservation()).isEqualTo(reservation);
         assertThat(store.row.execution().attempts()).isEqualTo(1);assertThat(pauses).hasValue(0);
         assertPublicProjectionUnchanged(store);
     }
-    @Test void openSalesAfterAPriorAmbiguousSaleKeepsTheMarkerAndConsumesAtMostOneMoreAttempt() {
+    @Test void openSalesAfterAPriorAmbiguousSaleDefersWithoutReleasingAndConsumesAtMostOneMoreAttempt() {
         outage(Op.SALES,3);
         Saga ambiguous=reservedSaga().attempt("register-sale",Instant.EPOCH); // an earlier POST whose outcome is unknown
         var store=new Store(ambiguous);var pauses=new AtomicInteger();
         usecase(store,pauses).execute(store.row.id());
         assertThat(delegate.calls(Op.RELEASE)).isZero();
         assertThat(store.row.status()).isEqualTo(Saga.Status.RUNNING);assertThat(store.row.failedStep()).isNull();
-        assertThat(store.row.errorDetail()).isEqualTo("OUTCOME_UNRESOLVED");assertThat(store.row.reservation()).isEqualTo(reservation);
+        assertThat(store.row.errorDetail()).isEqualTo("RETRY_DEFERRED");assertThat(store.row.reservation()).isEqualTo(reservation);
         assertThat(store.row.execution().pendingStep()).isEqualTo("register-sale");
         assertThat(store.row.execution().attempts()-ambiguous.execution().attempts()).isEqualTo(1);
         assertThat(store.row.execution().attempts()).isLessThan(3);assertThat(pauses).hasValue(0);
@@ -209,7 +209,7 @@ class CircuitProtectedParticipantsRemediationTest {
         var store=new Store(freshSaga());
         usecase(store,new AtomicInteger()).execute(store.row.id());
         assertThat(store.row.status()).isEqualTo(Saga.Status.RUNNING);assertThat(store.row.failedStep()).isNull();
-        assertThat(store.row.errorDetail()).isEqualTo("OUTCOME_UNRESOLVED").isNotEqualTo("PARTICIPANT_REJECTED");
+        assertThat(store.row.errorDetail()).isEqualTo("RETRY_DEFERRED").isNotEqualTo("PARTICIPANT_REJECTED");
         assertThat(store.row.reservation()).isNull();assertThat(delegate.calls(Op.RESERVE)).isZero();
         assertPublicProjectionUnchanged(store);
     }
@@ -237,7 +237,7 @@ class CircuitProtectedParticipantsRemediationTest {
     void assertPublicProjectionUnchanged(Store store) {
         assertThat(Arrays.stream(Saga.Status.values()).map(Enum::name).toList()).containsExactly("RUNNING","COMPLETED","COMPENSATED","FAILED");
         for(Saga saved:store.saved) {
-            assertThat(saved.errorDetail()).isIn((Object[])new String[]{null,"OUTCOME_UNRESOLVED","PARTICIPANT_REJECTED","COMPENSATION_EXHAUSTED"});
+            assertThat(saved.errorDetail()).isIn((Object[])new String[]{null,"OUTCOME_UNRESOLVED","RETRY_DEFERRED","PARTICIPANT_REJECTED","COMPENSATION_EXHAUSTED"});
             assertThat(String.valueOf(saved)).doesNotContainIgnoringCase("circuit");
         }
     }
