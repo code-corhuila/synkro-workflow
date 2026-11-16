@@ -32,7 +32,7 @@ public record AuditEvent(Instant timestamp, String correlationId, UUID sagaId, S
     }
     public enum Result {
         CREATED("created"), REPLAYED("replayed"), FORBIDDEN("forbidden"), CONFLICT("conflict"), RESUMED("resumed"),
-        SUCCEEDED("succeeded"), REJECTED("rejected"), TRANSIENT_FAILURE("transient-failure"), UNRESOLVED("unresolved"),
+        SUCCEEDED("succeeded"), REJECTED("rejected"), TRANSIENT_FAILURE("transient-failure"), DEFERRED("deferred"), UNRESOLVED("unresolved"),
         COMPLETED("completed"), COMPENSATED("compensated"), FAILED("failed");
         private final String wire;
         Result(String wire) { this.wire = wire; }

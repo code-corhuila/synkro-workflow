@@ -1,5 +1,6 @@
 package co.edu.corhuila.synkro.workflow.app;
 import co.edu.corhuila.synkro.workflow.application.port.out.*;
+import co.edu.corhuila.synkro.workflow.application.usecase.DeferralSchedule;
 import co.edu.corhuila.synkro.workflow.application.usecase.RegisterSale;
 import co.edu.corhuila.synkro.workflow.adapter.out.persistence.JdbcSagaStore;
 import co.edu.corhuila.synkro.workflow.adapter.out.http.HttpSaleParticipants;
@@ -38,7 +39,7 @@ public class WorkflowComposition {
     }
     @Bean AuditTrail auditTrail(){return new Slf4jAuditTrail();}
     @Bean RegisterSale usecase(SagaStore store,ExecutionCoordinator coordination,SaleParticipants participants,Clock clock,AuditTrail audit){
-        return new RegisterSale(store,coordination,participants,clock,UUID::randomUUID,FullJitterRetryDelay.system(),3,audit);
+        return new RegisterSale(store,coordination,participants,clock,UUID::randomUUID,FullJitterRetryDelay.system(),3,audit,DeferralSchedule.standard());
     }
     @Bean BackgroundExecution background(SagaStore store,RegisterSale usecase,@Value("${WORKFLOW_EXECUTORS:4}") int capacity,@Value("${WORKFLOW_QUEUE:64}") int queue,@Value("${WORKFLOW_SCAN_INTERVAL_MS:1000}") long interval){
         return new BackgroundExecution(store,usecase,capacity,queue,interval);
