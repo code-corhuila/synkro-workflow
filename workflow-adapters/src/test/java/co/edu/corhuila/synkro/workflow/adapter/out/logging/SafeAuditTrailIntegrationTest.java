@@ -70,9 +70,9 @@ class SafeAuditTrailIntegrationTest {
     @Test void failedSagaLeavesNoSecretsEvenWhenTheParticipantEchoesThem() throws Exception {
         var run = execute("explode");
         assertThat(run.store.row.status()).isEqualTo(Saga.Status.RUNNING);
-        assertThat(run.store.row.errorDetail()).isEqualTo("OUTCOME_UNRESOLVED");
+        assertThat(run.store.row.errorDetail()).isEqualTo("RETRY_DEFERRED");
         assertAudit(run, List.of("execute-step/validate-customer/succeeded", "execute-step/reserve-stock/succeeded",
-            "execute-step/register-sale/transient-failure", "execute-step/register-sale/transient-failure", "execute-step/register-sale/transient-failure", "execute-step/register-sale/unresolved"));
+            "execute-step/register-sale/transient-failure", "execute-step/register-sale/transient-failure", "execute-step/register-sale/transient-failure", "execute-step/register-sale/deferred"));
         assertNoSecrets(run.logs);
     }
 

@@ -74,12 +74,12 @@ class RegisterSaleAuditTest {
         assertThat(events).allSatisfy(event -> assertThat(event.correlationId()).isEqualTo(TRACE));
     }
 
-    @Test void exhaustedTransientFailuresAreAuditedAsUnresolvedAndNeverFinished() {
+    @Test void exhaustedTransientFailuresAreAuditedAsDeferredAndNeverFinished() {
         participants.transientSale = true;
         Saga saga = usecase.start(input, caller, "key-12345", TRACE).saga();
         usecase.execute(saga.id());
         List<Result> sale = events.stream().filter(e -> e.step() == Step.REGISTER_SALE).map(AuditEvent::result).toList();
-        assertThat(sale).containsExactly(Result.TRANSIENT_FAILURE, Result.TRANSIENT_FAILURE, Result.TRANSIENT_FAILURE, Result.UNRESOLVED);
+        assertThat(sale).containsExactly(Result.TRANSIENT_FAILURE, Result.TRANSIENT_FAILURE, Result.TRANSIENT_FAILURE, Result.DEFERRED);
         assertThat(events).noneMatch(e -> e.action() == Action.FINISH_SAGA);
     }
 
