@@ -170,7 +170,7 @@ class RetryPolicyRemediationTest {
         var memory=run(client,reservedSaga(),pauses);
         assertThat(seen).containsExactly("POST /api/v1/sales","POST /api/v1/sales","POST /api/v1/sales");
         assertThat(memory.row.execution().attempts()).isEqualTo(3);assertThat(pauses).hasValue(2);
-        assertThat(memory.row.status()).isEqualTo(Saga.Status.RUNNING);assertThat(memory.row.errorDetail()).isEqualTo("OUTCOME_UNRESOLVED");
+        assertThat(memory.row.status()).isEqualTo(Saga.Status.RUNNING);assertThat(memory.row.errorDetail()).isEqualTo("RETRY_DEFERRED");
         assertThat(memory.row.reservation().reservationId()).isEqualTo(reservation);
     }
     @Test void aRestartedObjectContinuingTheSamePostGetsNoFreshBudget() {
@@ -179,7 +179,7 @@ class RetryPolicyRemediationTest {
         assertThat(requestsBefore).isEqualTo(3);
         new RegisterSale(memory,memory,client,Clock.fixed(Instant.EPOCH,ZoneOffset.UTC),UUID::randomUUID,n->pauses.incrementAndGet(),3).execute(memory.row.id());
         assertThat(seen).hasSize(requestsBefore);assertThat(memory.row.execution().attempts()).isEqualTo(3);
-        assertThat(pauses).hasValue(2);assertThat(memory.row.errorDetail()).isEqualTo("OUTCOME_UNRESOLVED");
+        assertThat(pauses).hasValue(2);assertThat(memory.row.errorDetail()).isEqualTo("RETRY_DEFERRED");
     }
 
     // ---------- fixtures ----------

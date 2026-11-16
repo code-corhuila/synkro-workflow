@@ -91,7 +91,7 @@ class WorkflowHttpTest {
         String key="http-"+UUID.randomUUID();var first=request("/api/v1/sagas/register-sale",HttpMethod.POST,jwt("SALESPERSON"),key,input());
         assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         String location=first.getHeaders().getFirst("Location");assertThat(location).startsWith("/api/v1/sagas/");
-        assertThat(first.getBody()).contains("\"sagaType\":\"register-sale\"").doesNotContain("input","step_results","error_detail","execution","initiatedBy","service-sentinel");
+        assertThat(first.getBody()).contains("\"sagaType\":\"register-sale\"").doesNotContain("input","step_results","error_detail","execution","initiatedBy","service-sentinel","recovery","retryAt");
         var replay=request("/api/v1/sagas/register-sale",HttpMethod.POST,jwt("ADMIN"),key,input().replace(customer.toString(),customer.toString().toUpperCase(Locale.ROOT)).replace(",",",\n  "));assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(request(location,HttpMethod.GET,jwt("SALESPERSON"),null,null).getStatusCode()).isEqualTo(HttpStatus.OK);
         var conflict=request("/api/v1/sagas/register-sale",HttpMethod.POST,jwt("ADMIN"),key,input().replace("\"quantity\":2","\"quantity\":3"));
@@ -100,6 +100,19 @@ class WorkflowHttpTest {
         assertThat(foreignReplay.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(foreignReplay.getBody()).doesNotContain(location.substring(location.lastIndexOf('/')+1),caller.toString(),customer.toString(),other);
         assertThat(request(location,HttpMethod.GET,other,null,null).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+    @Test void readExposesOnlyThePublicRecoveryOfASuspendedSaga(){
+        java.time.Instant now=java.time.Instant.now();
+        Saga base=Saga.create(UUID.randomUUID(),"suspended-"+UUID.randomUUID(),caller,new SaleInput(customer,List.of(new SaleInput.Line(product,2))),"suspended-trace",now).attempt("validate-customer",now);
+        Saga deferred=base.defer(now.plus(java.time.Duration.ofHours(1)),now);
+        Saga review=Saga.create(UUID.randomUUID(),"review-"+UUID.randomUUID(),caller,new SaleInput(customer,List.of(new SaleInput.Line(product,2))),"review-trace",now).attempt("validate-customer",now).unresolved(now);
+        memory.rows.put(deferred.id(),deferred);memory.rows.put(review.id(),review);
+
+        var automatic=request("/api/v1/sagas/"+deferred.id(),HttpMethod.GET,jwt("SALESPERSON"),null,null);
+        assertThat(automatic.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(automatic.getBody()).contains("\"status\":\"RUNNING\"","\"recovery\":\"AUTOMATIC_RETRY\"").doesNotContain("RETRY_DEFERRED","retryAt","deferrals","error");
+        var operator=request("/api/v1/sagas/"+review.id(),HttpMethod.GET,jwt("ADMIN"),null,null);
+        assertThat(operator.getBody()).contains("\"status\":\"RUNNING\"","\"recovery\":\"OPERATOR_REQUIRED\"").doesNotContain("OUTCOME_UNRESOLVED");
     }
     @Test void malformedRequestsCannotReachParticipants(){
         for(String body:List.of("{bad","{}",input().replace("\"quantity\":2","\"quantity\":0"),input().replace("\"quantity\":2","\"quantity\":1.5"),input().replace(customer.toString(),"1-1-1-1-1"))) {
