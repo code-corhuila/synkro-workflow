@@ -24,8 +24,8 @@ public class SagaController {
         this.usecase=usecase;this.store=store;this.background=background;this.deadline=deadline;
     }
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record Response(UUID sagaId,String sagaType,Saga.Status status,List<String> completedSteps,String failedStep,UUID saleId,Instant createdAt,Instant updatedAt) {
-        static Response from(Saga s){return new Response(s.id(),"register-sale",s.status(),s.completedSteps(),s.status()==Saga.Status.COMPENSATED||s.status()==Saga.Status.FAILED?s.failedStep():null,s.status()==Saga.Status.COMPLETED?s.saleId():null,s.createdAt(),s.updatedAt());}
+    public record Response(UUID sagaId,String sagaType,Saga.Status status,Saga.Recovery recovery,List<String> completedSteps,String failedStep,UUID saleId,Instant createdAt,Instant updatedAt) {
+        static Response from(Saga s){return new Response(s.id(),"register-sale",s.status(),s.recovery(),s.completedSteps(),s.status()==Saga.Status.COMPENSATED||s.status()==Saga.Status.FAILED?s.failedStep():null,s.status()==Saga.Status.COMPLETED?s.saleId():null,s.createdAt(),s.updatedAt());}
     }
     @PostMapping("/register-sale")
     ResponseEntity<Response> start(@RequestBody JsonNode body,@RequestHeader(value="Idempotency-Key",required=false) String key,@AuthenticationPrincipal Jwt token,HttpServletRequest request) {

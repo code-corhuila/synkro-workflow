@@ -12,7 +12,21 @@ public final class JdbcSagaStore implements SagaStore,ExecutionCoordinator {
     private final DataSource dataSource;
     private final ObjectMapper json;
     private static final String COLUMNS="saga_id,idempotency_key,initiated_by,input,status,completed_steps,failed_step,error_detail,step_results,created_at,updated_at";
-    public record Results(Reservation reservation,UUID saleId,Saga.Execution execution) {}
+    public record Results(Reservation reservation,UUID saleId,ExecutionRow execution) {}
+    /** Persisted shape of Saga.Execution; retryAtEpochMilli keeps the scan's due-time filter independent of JSON date settings. */
+    public record ExecutionRow(String correlationId,String pendingStep,int attempts,int deferrals,Long retryAtEpochMilli) {
+        static ExecutionRow of(Saga.Execution x) {
+            return new ExecutionRow(x.correlationId(),x.pendingStep(),x.attempts(),x.deferrals(),x.retryAt()==null?null:x.retryAt().toEpochMilli());
+        }
+        Saga.Execution toExecution() {
+            return new Saga.Execution(correlationId,pendingStep,attempts,deferrals,retryAtEpochMilli==null?null:java.time.Instant.ofEpochMilli(retryAtEpochMilli));
+        }
+    }
+    private static final String SCHEDULABLE="SELECT saga_id FROM workflow_schema.saga_instance WHERE status='RUNNING'"
+        +" AND error_detail IS DISTINCT FROM 'OUTCOME_UNRESOLVED'"
+        +" AND (error_detail IS DISTINCT FROM 'RETRY_DEFERRED'"
+        +" OR (step_results->'execution'->>'retryAtEpochMilli')::bigint <= (extract(epoch FROM clock_timestamp())*1000)::bigint)"
+        +" ORDER BY created_at,saga_id LIMIT ?";
     public JdbcSagaStore(DataSource dataSource,ObjectMapper json) {this.dataSource=dataSource;this.json=json;}
     private Connection connect() throws SQLException {
         Connection c=dataSource.getConnection();
@@ -42,7 +56,7 @@ public final class JdbcSagaStore implements SagaStore,ExecutionCoordinator {
         }
     }
     public List<UUID> running(int limit) {
-        try(var c=connect();var s=c.prepareStatement("SELECT saga_id FROM workflow_schema.saga_instance WHERE status='RUNNING' AND error_detail IS DISTINCT FROM 'OUTCOME_UNRESOLVED' ORDER BY created_at,saga_id LIMIT ?")) {
+        try(var c=connect();var s=c.prepareStatement(SCHEDULABLE)) {
             s.setInt(1,Math.max(1,Math.min(limit,1000)));try(var r=s.executeQuery()){var ids=new ArrayList<UUID>();while(r.next())ids.add(r.getObject(1,UUID.class));return ids;}
         }catch(Exception e){throw safe();}
     }
@@ -86,13 +100,13 @@ public final class JdbcSagaStore implements SagaStore,ExecutionCoordinator {
             finally {try{connection.close();}catch(SQLException ignored){}}
         }
     }
-    private String results(Saga s) throws Exception {return json.writeValueAsString(new Results(s.reservation(),s.saleId(),s.execution()));}
+    private String results(Saga s) throws Exception {return json.writeValueAsString(new Results(s.reservation(),s.saleId(),ExecutionRow.of(s.execution())));}
     private Saga read(ResultSet r) throws Exception {
         Results result=json.readValue(r.getString("step_results"),Results.class);
         return new Saga(r.getObject("saga_id",UUID.class),r.getString("idempotency_key"),r.getObject("initiated_by",UUID.class),
             json.readValue(r.getString("input"),SaleInput.class),Saga.Status.valueOf(r.getString("status")),
             Arrays.asList((String[])r.getArray("completed_steps").getArray()),r.getString("failed_step"),r.getString("error_detail"),
-            result.reservation(),result.saleId(),result.execution(),r.getTimestamp("created_at").toInstant(),r.getTimestamp("updated_at").toInstant());
+            result.reservation(),result.saleId(),result.execution().toExecution(),r.getTimestamp("created_at").toInstant(),r.getTimestamp("updated_at").toInstant());
     }
     private static WorkflowError safe(){return new WorkflowError("INTERNAL_ERROR");}
 }
