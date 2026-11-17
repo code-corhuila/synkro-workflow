@@ -43,6 +43,32 @@ class JdbcSagaStoreTest {
         assertThat(store.healthy()).isTrue();
         assertThat(store.running(100)).contains(saga.id());
     }
+    @Test void scanReturnsDeferredSagasOnlyWhenDueAndNeverOperatorReview() {
+        Instant now=Instant.now();
+        UUID due=stored(saga("due-"+UUID.randomUUID()),s->s.attempt("register-sale",now).defer(now.minus(Duration.ofMinutes(1)),now));
+        UUID waiting=stored(saga("waiting-"+UUID.randomUUID()),s->s.attempt("register-sale",now).defer(now.plus(Duration.ofHours(1)),now));
+        UUID review=stored(saga("review-"+UUID.randomUUID()),s->s.attempt("register-sale",now).unresolved(now));
+
+        assertThat(store.running(1000)).contains(due).doesNotContain(waiting,review);
+        Saga reloaded=store.find(waiting).orElseThrow();
+        assertThat(reloaded.recovery()).isEqualTo(Saga.Recovery.AUTOMATIC_RETRY);
+        assertThat(reloaded.execution().retryAt()).isEqualTo(now.plus(Duration.ofHours(1)).truncatedTo(java.time.temporal.ChronoUnit.MILLIS));
+        assertThat(reloaded.execution().deferrals()).isEqualTo(1);
+        assertThat(store.find(review).orElseThrow().recovery()).isEqualTo(Saga.Recovery.OPERATOR_REQUIRED);
+    }
+    @Test void rowsWrittenBeforeDeferralSupportStillLoad() throws SQLException {
+        Saga saga=saga("legacy-"+UUID.randomUUID());store.create(saga);
+        sql("UPDATE workflow_schema.saga_instance SET step_results='{\"reservation\":null,\"saleId\":null,\"execution\":{\"correlationId\":\"original-correlation\",\"pendingStep\":\"register-sale\",\"attempts\":3}}'::jsonb, error_detail='OUTCOME_UNRESOLVED' WHERE saga_id='"+saga.id()+"'");
+        Saga legacy=store.find(saga.id()).orElseThrow();
+        assertThat(legacy.execution().attempts()).isEqualTo(3);assertThat(legacy.execution().deferrals()).isZero();
+        assertThat(legacy.execution().retryAt()).isNull();assertThat(legacy.recovery()).isEqualTo(Saga.Recovery.OPERATOR_REQUIRED);
+        assertThat(store.running(1000)).doesNotContain(saga.id());
+    }
+    UUID stored(Saga saga,java.util.function.UnaryOperator<Saga> transition) {
+        store.create(saga);
+        try(var owner=store.tryOwn(saga.id()).orElseThrow()){owner.save(transition.apply(owner.load()));}
+        return saga.id();
+    }
     @Test void concurrentCreationAndSessionOwnership() throws Exception {
         String key="concurrent-"+UUID.randomUUID();
         try(var pool=Executors.newFixedThreadPool(6)) {

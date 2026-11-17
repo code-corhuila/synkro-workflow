@@ -6,6 +6,7 @@ import co.edu.corhuila.synkro.workflow.application.port.out.AuditEvent.Action;
 import co.edu.corhuila.synkro.workflow.application.port.out.AuditEvent.Result;
 import co.edu.corhuila.synkro.workflow.application.port.out.AuditEvent.Step;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.*;
 
 /** The three owning operations, without transport, database or framework dependencies. */
@@ -18,14 +19,20 @@ public final class RegisterSale {
     private final RetryDelay delay;
     private final int maxAttempts;
     private final AuditTrail audit;
+    private final DeferralSchedule deferrals;
     public RegisterSale(SagaStore store,ExecutionCoordinator coordination,SaleParticipants participants,
                         Clock clock,Identifiers ids,RetryDelay delay,int maxAttempts) {
         this(store,coordination,participants,clock,ids,delay,maxAttempts,AuditTrail.NONE);
     }
     public RegisterSale(SagaStore store,ExecutionCoordinator coordination,SaleParticipants participants,
                         Clock clock,Identifiers ids,RetryDelay delay,int maxAttempts,AuditTrail audit) {
+        this(store,coordination,participants,clock,ids,delay,maxAttempts,audit,DeferralSchedule.standard());
+    }
+    public RegisterSale(SagaStore store,ExecutionCoordinator coordination,SaleParticipants participants,
+                        Clock clock,Identifiers ids,RetryDelay delay,int maxAttempts,AuditTrail audit,DeferralSchedule deferrals) {
         this.store=store;this.coordination=coordination;this.participants=participants;
         this.clock=clock;this.ids=ids;this.delay=delay;this.maxAttempts=maxAttempts;this.audit=Objects.requireNonNull(audit);
+        this.deferrals=Objects.requireNonNull(deferrals);
         if(maxAttempts<1 || maxAttempts>10) throw new IllegalArgumentException("Invalid attempt bound");
     }
     public SagaStore.Created start(SaleInput input,UUID caller,String key,String trace) {
@@ -46,7 +53,11 @@ public final class RegisterSale {
         var owned=coordination.tryOwn(id);if(owned.isEmpty()) return;
         try(var lease=owned.get()) {
             Saga saga=lease.load();
-            if(saga==null || saga.status()!=Saga.Status.RUNNING) return;
+            if(saga==null || saga.status()!=Saga.Status.RUNNING || saga.requiresOperator()) return;
+            if(saga.isDeferred()) {
+                if(!saga.isRetryDue(clock.instant())) return;
+                saga=saga.resumeDeferred(clock.instant());lease.save(saga);
+            }
             if(!saga.completedSteps().isEmpty() || saga.execution().pendingStep()!=null || saga.failedStep()!=null || saga.execution().attempts()>0)
                 auditSaga(saga,null,Action.RESUME_SAGA,Result.RESUMED);
             while(saga.status()==Saga.Status.RUNNING) {
@@ -78,22 +89,27 @@ public final class RegisterSale {
                             break;
                         }
                         ambiguous=true;
-                        if(failure.kind()!=ParticipantFailure.Kind.TRANSIENT) {
-                            lease.save(saga.unresolved(clock.instant()));
-                            auditSaga(saga,step,Action.EXECUTE_STEP,Result.UNRESOLVED);
-                            return;
-                        }
+                        if(failure.kind()==ParticipantFailure.Kind.CIRCUIT_OPEN) { deferOrEscalate(lease,saga,step);return; }
+                        if(failure.kind()!=ParticipantFailure.Kind.TRANSIENT) { escalate(lease,saga,step);return; }
                         auditSaga(saga,step,Action.EXECUTE_STEP,Result.TRANSIENT_FAILURE);
                         if(saga.execution().attempts()<maxAttempts) delay.pause(saga.execution().attempts());
                     }
                 }
-                if(!success && saga.failedStep()==null) {
-                    lease.save(saga.unresolved(clock.instant()));
-                    auditSaga(saga,step,Action.EXECUTE_STEP,Result.UNRESOLVED);
-                    return;
-                }
+                if(!success && saga.failedStep()==null) { deferOrEscalate(lease,saga,step);return; }
             }
         }
+    }
+    /** An unavailable participant is retried forward later with the same step key; never compensated blindly. */
+    private void deferOrEscalate(ExecutionCoordinator.Lease lease,Saga saga,String step) {
+        var wait=deferrals.waitAfter(saga.execution().deferrals());
+        if(wait.isEmpty()) { escalate(lease,saga,step);return; }
+        Instant now=clock.instant();
+        lease.save(saga.defer(now.plus(wait.get()),now));
+        auditSaga(saga,step,Action.EXECUTE_STEP,Result.DEFERRED);
+    }
+    private void escalate(ExecutionCoordinator.Lease lease,Saga saga,String step) {
+        lease.save(saga.unresolved(clock.instant()));
+        auditSaga(saga,step,Action.EXECUTE_STEP,Result.UNRESOLVED);
     }
     private void compensate(ExecutionCoordinator.Lease lease,Saga saga) {
         if(saga.reservation()==null) {
